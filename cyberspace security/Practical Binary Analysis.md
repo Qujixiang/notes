@@ -158,14 +158,9 @@ $ objdump -M intel -d a.out
 6. 重定位，将二进制文件代码段指向动态库的引用修改为正确的地址
 7. 寻找二进制程序的入口，并将控制权交给二进制程序，二进制程序开始执行
 
-## 参考
-
-1. 编译系统透视：图解编译原理，第8章-预处理
-1. [Debugging with Symbols - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/dxtecharts/debugging-with-symbols)
 
 
-
-# 第二部分、ELF格式
+## 2. ELF格式
 
 ELF (Executable and Linkable Format，可执行和链接格式)，ELF包含四种类型的内容：
 
@@ -180,7 +175,9 @@ ELF (Executable and Linkable Format，可执行和链接格式)，ELF包含四�
 
 ![64位ELF二进制文件概览](assets/Practical Binary Analysis/image-20220729094002496.png)
 
-## 2.1 可执行头(Executable Header)
+
+
+### 2.1 可执行头(Executable Header)
 
 每个ELF文件都以可执行头开始，可执行头表明这是一个ELF格式文件，并表明了它是哪一类ELF文件，以及去哪里找到其它内容。
 
@@ -212,9 +209,7 @@ ELF Header:
 
 
 
-
-
-### ELF64_Ehdr
+#### ELF64_Ehdr
 
 ```c
 #define EI_NIDENT	16
@@ -238,13 +233,7 @@ typedef struct
 } Elf64_Ehdr;
 ```
 
-
-
-### e_ident[]
-
-e_ident的前四个字节为幻数(magic value)，表明这是一个ELF格式文件。
-
-**e_ident[]各个位的含义:**
+- e_ident：前四个字节为幻数(magic value)，表明这是一个ELF格式文件。e_ident各个位的含义:
 
 | Name          | Value | Purpose                                                      |
 | ------------- | ----- | ------------------------------------------------------------ |
@@ -259,11 +248,7 @@ e_ident的前四个字节为幻数(magic value)，表明这是一个ELF格式文
 | EI_ABIVERSION | 8     | ABI版本                                                      |
 | EI_PAD        | 9     | 填充开始位，置0，保留                                        |
 
-
-
-### e_type
-
-表明文件类型，文件类型有以下几种：
+- e_type：表明文件类型，文件类型有以下几种：
 
 | Name      | Value  | Meaning      |
 | --------- | ------ | ------------ |
@@ -275,11 +260,7 @@ e_ident的前四个字节为幻数(magic value)，表明这是一个ELF格式文
 | ET_LOPROC | 0xff00 | 由处理器指定 |
 | ET_HIPROC | 0xffff | 由处理器指定 |
 
-
-
-### e_machine
-
-表明该文件所需的机器架构。
+- e_machine：表明该文件所需的机器架构。
 
 | Name           | Value | Meaning                |
 | -------------- | ----- | ---------------------- |
@@ -294,94 +275,32 @@ e_ident的前四个字节为幻数(magic value)，表明这是一个ELF格式文
 | EM_MIPS_RS4_BE | 10    | MIPS RS4000 Big-Endian |
 | RESERVED       | 11-16 | 保留备用               |
 
-
-
-### e_version
-
-表明目标文件的版本。
+- e_version：表明目标文件的版本。1表示文件的原始格式，更高的数字可以用来表明扩展文件的格式。
 
 | Name       | Value | Meaning  |
 | ---------- | ----- | -------- |
 | EV_NONE    | 0     | 非法版本 |
 | EV_CURRENT | 1     | 当前版本 |
 
-1表示文件的原始格式，更高的数字可以用来表明扩展文件的格式。
+- e_entry：指出系统应该将控制权转交给的虚拟地址，然后进程开始执行。如果文件没有入口地址，则该项为0。
 
+- e_phoff：Program Header Table在文件中的偏移量，如果文件没有Program Header Table，则该项为0。
 
+- e_shoff：Section Header Table在文件中的偏移量，如果文件没有Section Header Table，则该项为0。
 
-### e_entry
+- e_flags：与处理器架构相关的标志位。对于x86架构，e_flags常设置为0，不用标志位。对于ARM架构，e_flags可以设置文件格式惯例、栈的组织方式等关于接口的额外细节信息并告知给嵌入式操作系统。
 
-指出系统应该将控制权转交给的虚拟地址，然后进程开始执行。如果文件没有入口地址，则该项为0。
+- e_ehsize：ELF Header的大小。
 
+- e_phentsize：Program Header Table的每一项的大小。所有表项的大小相同。
 
+- e_phnum：Program Header Table的项目数量。e_phentsize * e_phnum表明了Program Header Table的总大小。如果文件中没有Program Header Table，则e_phnum为0。
 
-### e_phoff
+- e_shentsize：Section Header Table的每一项的大小。所有表项的大小相同。
 
-Program Header Table在文件中的偏移量，如果文件没有Program Header Table，则该项为0。
+- e_shnum：Section Header Table的项目数量。e_shentsize * e_shnum表明了Section Header Table的总大小。如果文件中没有Section Header Table，则e_shnum为0。
 
-
-
-### e_shoff
-
-Section Header Table在文件中的偏移量，如果文件没有Section Header Table，则该项为0。
-
-
-
-### e_flags
-
-与处理器架构相关的标志位。
-
-对于x86架构，e_flags常设置为0，不用标志位。
-
-对于ARM架构，e_flags可以设置文件格式惯例、栈的组织方式等关于接口的额外细节信息并告知给嵌入式操作系统。
-
-
-
-### e_ehsize
-
-ELF Header的大小。
-
-
-
-### e_phentsize
-
-Program Header Table的每一项的大小。所有表项的大小相同。
-
-
-
-### e_phnum
-
-Program Header Table的项目数量。
-
-e_phentsize * e_phnum表明了Program Header Table的总大小。
-
-如果文件中没有Program Header Table，则e_phnum为0。
-
-
-
-### e_shentsize
-
-Section Header Table的每一项的大小。所有表项的大小相同。
-
-
-
-### e_shnum
-
-Section Header Table的项目数量。
-
-e_shentsize * e_shnum表明了Section Header Table的总大小。
-
-如果文件中没有Section Header Table，则e_shnum为0。
-
-
-
-### e_shstrndx
-
-Section Name String Table(.shstrtab)节在Section Header Table里的索引下标。
-
-Section Name String Table(.shstrtab)储存着所有节的名称。
-
-
+- e_shstrndx：Section Name String Table(.shstrtab)节在Section Header Table里的索引下标。Section Name String Table(.shstrtab)储存着所有节的名称。
 
 ```bash
 $ readelf -x .shstrtab a.out
@@ -409,7 +328,7 @@ Hex dump of section '.shstrtab':
 
 
 
-## 2.2 节头(Section Headers)
+### 2.2 节头(Section Headers)
 
 ELF二进制文件将代码和数据从逻辑上划分为多个连续的、不重叠的块，这种块称之为**节(section)**。每个节都由**节头(section header)**进行描述，节头指定了节的属性和位置。**节头表(section header table)**里保存了所有节的节头信息。
 
@@ -417,7 +336,7 @@ ELF二进制文件将代码和数据从逻辑上划分为多个连续的、不�
 
 
 
-### Elf64_Shdr
+#### Elf64_Shdr
 
 ```c
 typedef struct
@@ -435,30 +354,22 @@ typedef struct
 } Elf64_Shdr;
 ```
 
+- sh_name：节的名称，它的值是节的名称在字符串表(string table, .strtab)中的索引。
 
-
-### sh_name
-
-表明了节的名称，它的值是节的名称在字符串表(string table, .strtab)中的索引。
-
-
-
-### sh_type
-
-该字段表明了这个节的类型。
+- sh_type：节的类型。
 
 | Name         | Value      | Meaning                                                      |
 | ------------ | ---------- | ------------------------------------------------------------ |
 | SHT_NULL     | 0          | 没有相关的节与之对应，其它字段的值未定义。                   |
 | SHT_PROGBITS | 1          | 该节存储着程序定义的信息，它的格式和含义仅由程序定义。       |
-| SHT_SYMTAB   | 2          | 符号表，存放符号信息。参见[Elf64_Sym](#### /usr/include/elf.h中Elf64_Dyn的定义)。 |
+| SHT_SYMTAB   | 2          | 符号表，存放符号信息。参见[Elf64_Sym](####Elf64_Dyn)。       |
 | SHT_STRTAB   | 3          | 字符串表，存放符号名称和程序中用到的字符串。                 |
-| SHT_RELA     | 4          | 重定位节，包含重定位入口。参见[Elf64_Rela](# 第一部分、二进制格式)。 |
+| SHT_RELA     | 4          | 重定位节，包含重定位入口。参见[Elf64_Rela](####Elf64_Rela)。 |
 | SHT_HASH     | 5          | 这样的节中包含一个符号哈希表，参与动态链接的目标文件必须有一个哈希表。 |
-| SHT_DYNAMIC  | 6          | 包含动态链接的信息。参见**Elf64_Dyn**。                      |
+| SHT_DYNAMIC  | 6          | 包含动态链接的信息。参见[Elf64_Dyn](####Elf64_Dyn)。         |
 | SHT_NOTE     | 7          | 标记文件的信息。                                             |
 | SHT_NOBITS   | 8          | 这种节不含任何字节，也不占用文件空间，节头中的**sh_offset**字段只是概念上的偏移 |
-| SHT_REL      | 9          | 重定位节，包含重定位条目。参见**Elf64_Rel**。                |
+| SHT_REL      | 9          | 重定位节，包含重定位条目。参见[Elf64_Rel](####Elf64_Rel)。   |
 | SHT_SHLIB    | 10         | 保留，语义未指定。                                           |
 | SHT_DYNSYM   | 11         | 用于动态链接的符号表，是symbol table的子集。                 |
 | SHT_LOPROC   | 0x70000000 | 保留，由处理器指定语义。                                     |
@@ -466,11 +377,7 @@ typedef struct
 | SHT_LOUSER   | 0x80000000 | 由应用程序指定语义。                                         |
 | SHT_HIUSER   | 0xffffffff | 由应用程序指定语义。                                         |
 
-
-
-### sh_flags
-
-表明了节的属性。
+- sh_flags：表明了节的属性。
 
 | Name          | Value      | Meaning                  |
 | ------------- | ---------- | ------------------------ |
@@ -479,35 +386,15 @@ typedef struct
 | SHF_EXECINSTR | 0x4        | 该节包含可执行的机器指令 |
 | SHF_MASKPROC  | 0xf0000000 | 高四位由处理器指定语义   |
 
+- sh_addr：如果这个节会出现在进程的内存映像中，则该项指出了节的第一个字节的内存地址。否则，该项为0。
 
+- sh_offset：这个节在文件中的偏移量。
 
-### sh_addr
+- sh_size：节的大小。SHT_NOBITS类型的节的sh_size可能为0，但是它所占的实际空间为0。
 
-如果这个节会出现在进程的内存映像中，则该项指出了节的第一个字节的内存地址。否则，该项为0。
+- sh_link：它的值为Section Header Table的索引下标。它的含义由节的类型决定。
 
-
-
-### sh_offset
-
-这个节在文件中的偏移量。
-
-
-
-### sh_size
-
-节的大小。SHT_NOBITS类型的节的sh_size可能为0，但是它所占的实际空间为0。
-
-
-
-### sh_link
-
-它的值为Section Header Table的索引下标。它的含义由节的类型决定。
-
-
-
-### sh_info
-
-它保存了额外信息。它的含义由节的类型决定。
+- sh_info：它保存了额外信息。它的含义由节的类型决定。
 
 **sh_link**和**sh_info**的含义：
 
@@ -519,23 +406,13 @@ typedef struct
 | SHT_SYMTAB、SHT_DYNSYM | 由操作系统指定                         | 由操作系统指定           |
 | other                  | SHN_UNDEF                              | 0                        |
 
+- sh_addralign：表明了节需要对齐的字节数。0和1表示不对齐，其它的值必须为2的指数倍。
 
-
-### sh_addralign
-
-表明了节需要对齐的字节数。0和1表示不对齐，其它的值必须为2的指数倍。
-
-
-
-### sh_entsize
-
-类似符号表等节拥有固定表项大小的表，该字段指明了表项的大小。0表示该节不含有固定表项大小的表。
+- sh_entsize：类似符号表等节拥有固定表项大小的表，该字段指明了表项的大小。0表示该节不含有固定表项大小的表。
 
 
 
-
-
-## 2.3 节(Sections)
+### 2.3 节(Sections)
 
 ELF文件由一系列的节组成，每一节都有不同的含义，负责不同的工作。
 
@@ -585,7 +462,7 @@ Key to Flags:
 
 
 
-### 特殊的节
+#### 特殊的节
 
 | Name        | Type           | Attributes                 | Meaning                                                      |
 | ----------- | -------------- | -------------------------- | ------------------------------------------------------------ |
@@ -619,9 +496,9 @@ Key to Flags:
 
 
 
-### 符号表(Symbol Table)
+#### 符号表(Symbol Table)
 
-#### Elf64_Sym
+##### Elf64_Sym
 
 ```c
 typedef struct elf64_sym {
@@ -634,17 +511,9 @@ typedef struct elf64_sym {
 } Elf64_Sym;
 ```
 
+- st_name：符号名，在字符串表的索引。
 
-
-##### st_name
-
-符号名，在字符串表的索引。
-
-
-
-##### st_info
-
-包含符号类型和绑定信息。低4位为类型信息，其余高位为绑定信息。
+- st_info：包含符号类型和绑定信息。低4位为类型信息，其余高位为绑定信息。
 
 ```c
 #define ELF_ST_BIND(x)		((x) >> 4)
@@ -671,17 +540,9 @@ typedef struct elf64_sym {
 | STT_COMMON  | 5     | 此符号标记未初始化的通用块。此符号的处理与 `STT_OBJECT` 的处理完全相同。 |
 | STT_TLS     | 6     | 此符号指定线程局部存储实体。定义后，此符号可为符号指明指定的偏移，而不是实际地址。 |
 
+- st_other：未定义，置0。
 
-
-##### st_other
-
-未定义，置0。
-
-
-
-##### st_shndx
-
-符号所在节的节头索引。
+- st_shndx：符号所在节的节头索引。
 
 **特殊的索引:**
 
@@ -691,29 +552,36 @@ typedef struct elf64_sym {
 | SHN_ABS    | 0xfff1 | 此符号具有不会由于重定位而发生更改的绝对值。                 |
 | SHN_COMMON | 0xfff2 | 此符号标记尚未分配的通用块。与节的 `sh_addralign` 成员类似，符号的值也会指定对齐约束。链接器在值为 `st_value` 的倍数的地址为符号分配存储空间。符号的大小会指明所需的字节数。 |
 
+- st_value：具体含义取决于上下文，可能是一个绝对值、一个地址等。
+
+  - 在可重定位文件中，若`st_shndx`为`SHN_COMMON`，则`st_value`为对齐约束值。
+
+  - 在可重定位文件中，若`st_shndx`为正常的索引值，则`st_value`为该符号在`st_shndx`所标识的节中的偏移量。
+
+  - 在可执行文件和共享文件中，`st_value`为虚拟地址。为使这些文件的符号更适用于运行时链接程序，所以节偏移替换为虚拟地址。
 
 
-##### st_value
-
-具体含义取决于上下文，可能是一个绝对值、一个地址等。
-
-- 在可重定位文件中，若`st_shndx`为`SHN_COMMON`，则`st_value`为对齐约束值。
-- 在可重定位文件中，若`st_shndx`为正常的索引值，则`st_value`为该符号在`st_shndx`所标识的节中的偏移量。
-- 在可执行文件和共享文件中，`st_value`为虚拟地址。为使这些文件的符号更适用于运行时链接程序，所以节偏移替换为虚拟地址。
-
-
-
-##### st_size
-
-符号所表示的对象的大小。
+- st_size：符号所表示的对象的大小。
 
 
 
-### 重定位表(Relocation Table)
+#### 重定位表(Relocation Table)
 
 重定位是将符号引用与符号定义联系起来的过程。例如，当一个程序调用一个函数时，相关的调用指令必须在执行时将控制权转移到适当的目标地址。换句话说，可重定位文件必须有描述如何修改其部分内容的信息，从而使可执行文件和共享对象文件能够为进程映像持有正确的信息。重定位表就是这些信息。
 
-#### Elf64_Rela
+##### Elf64_Rel
+
+```c
+typedef struct
+{
+  Elf64_Addr	r_offset;		/* Address */
+  Elf64_Xword	r_info;			/* Relocation type and symbol index */
+} Elf64_Rel;
+```
+
+
+
+##### Elf64_Rela
 
 ```c
 typedef struct elf64_rela {
@@ -723,41 +591,29 @@ typedef struct elf64_rela {
 } Elf64_Rela;
 ```
 
-##### r_offset
+- r_offset：这个成员给出了重定位操作的位置。对于一个可重定位的文件，该值为从节的开始到需要重定位的存储单元的字节偏移。对于可执行文件或共享目标，该值是需要重定位的存储单元的虚拟地址。对于不同的文件类型，`r_offset`有不同的含义：
 
-这个成员给出了重定位操作的位置。对于一个可重定位的文件，该值为从节的开始到需要重定位的存储单元的字节偏移。对于可执行文件或共享目标，该值是需要重定位的存储单元的虚拟地址。
+  - 在可重定位文件中，`r_offset`保存了一个在节中的偏移值。即，重定位节本身描述了如何修改另一个节，`r_offset`指明了修改另一个节中的哪个存储单元。
 
-对于不同的文件类型，`r_offset`有不同的含义：
-
-- 在可重定位文件中，`r_offset`保存了一个在节中的偏移值。即，重定位节本身描述了如何修改另一个节，`r_offset`指明了修改另一个节中的哪个存储单元。
-- 在可执行文件和共享目标文件中，为了让重定位的条目对动态链接器更有用，所以`r_offset`保存了一个虚拟地址。
+  - 在可执行文件和共享目标文件中，为了让重定位的条目对动态链接器更有用，所以`r_offset`保存了一个虚拟地址。
 
 
-
-##### r_info
-
-此成员指定必须对其进行重定位的符号表索引以及要应用的重定位类型。例如，调用指令的重定位项包含所调用的函数的符号表索引。如果索引是未定义的符号索引 `STN_UNDEF`，则重定位将使用零作为符号值。
-
-可以使用`ELF64_R_TYPE` 或 `ELF64_R_SYM`获取重定位类型和符号。
+- r_info：此成员指定必须对其进行重定位的符号表索引以及要应用的重定位类型。例如，调用指令的重定位项包含所调用的函数的符号表索引。如果索引是未定义的符号索引 `STN_UNDEF`，则重定位将使用零作为符号值。可以使用`ELF64_R_TYPE` 或 `ELF64_R_SYM`获取重定位类型和符号。
 
 ```c
 #define ELF64_R_SYM(i)			((i) >> 32)
 #define ELF64_R_TYPE(i)			((i) & 0xffffffff)
 ```
 
-
-
-##### r_addend
-
-此成员指定常量加数，用于计算将存储在可重定位字段中的值。
+- r_addend：此成员指定常量加数，用于计算将存储在可重定位字段中的值。
 
 
 
-### 动态节(.dynamic)
+#### 动态节(.dynamic)
 
 如果目标文件参与动态链接，则其程序头表将包含一个类型为 `PT_DYNAMIC` 的元素。此段包含 `.dynamic` 节。特殊符号 `_DYNAMIC` 用于标记包含以下结构的数组的节。此段包含了程序所需的依赖项，以及动态链接所需的GOT、PLT、符号哈希表、字符串表、符号表、重定位表等信息。
 
-#### Elf64_Dyn
+##### Elf64_Dyn
 
 ```c
 typedef struct {
@@ -773,7 +629,7 @@ d_un的具体含义取决于d_tag，d_tag表示各个表项的类型。
 
 
 
-### 符号哈希表(Symbol Hash Table)
+#### 符号哈希表(Symbol Hash Table)
 
 符号哈希表根据符号名通过哈希函数快速查找符号在符号表中的位置。
 
@@ -806,7 +662,7 @@ d_un的具体含义取决于d_tag，d_tag表示各个表项的类型。
 
 
 
-### 全局偏移表(Global Offset Table)
+#### 全局偏移表(Global Offset Table)
 
 装载时重定位是解决动态模块中含有绝对地址引用的办法之一，但是代码无法在多个进程之间共享，因为不同进程的地址空间不同，重定位后的代码所包含的绝对地址只对一个程序适用，对其它程序不适用，这样就失去了动态链接节省内存的优势。所以我们希望程序模块中共享的指令部分在装载时不需要因为装载地址的改变而改变，意在将指令中需要被修改的部分分离出来，和数据部分放在一起，这样指令部分就可以保持不变，而数据部分可以在每个进程中拥有一个副本，这种方案目前就被称为**地址无关代码(PIC, Position Independent Code)**的技术。
 
@@ -831,8 +687,7 @@ d_un的具体含义取决于d_tag，d_tag表示各个表项的类型。
 
 
 
-
-### 延迟加载(Lazy Binding) & 过程链接表(Procedure Linkage Table)
+#### 延迟加载(Lazy Binding) & 过程链接表(Procedure Linkage Table)
 
 动态链接虽然比静态链接产生的文件更小，更节省内存，但是它是以牺牲一部分性能为代价的。动态链接对于全局变量和外部数据的访问都要先进行`GOT`定位，然后间接寻址，对于模块间的定位也要先定位`GOT`，然后再进行间接跳转，如此一来，程序的运行速度必然减慢；另一个减慢速度的原因是在装载程序时，动态链接器都要进行一次链接工作，寻找并装载所需要的共享目标，然后进行符号查找和地址重定位等工作。这些原因影响着动态链接的性能。
 
@@ -870,11 +725,257 @@ ext_fun@got:
 
 
 
+### 2.4 程序头(Program Headers)
+
+与节头表(Section Header Table)把二进制文件看作是节(section)的组合相反，程序头表(Program Header Table)把二进制文件看作是段(segment)的组合。节仅用于静态链接，而段用于操作系统和动态链接器执行ELF文件，并定位相关代码和数据，以及决定把哪些段装载到虚拟内存空间中。ELF文件头中的`e_phoff`指出了程序头表的位置，`e_phentsize`指出了程序头表的表项的大小，`e_phnum`指出了程序头表的表项的个数。
+
+由于段提供了执行视图，所以段仅用于可执行文件，而不用于不可执行的文件，比如需要重定位的目标文件。
+
+程序头表使用`Elf64_Phdr`结构体表示程序头表的项目。
+
+#### Elf64_Phdr
+
+```c
+typedef struct
+{
+  Elf64_Word	p_type;			/* Segment type */
+  Elf64_Word	p_flags;		/* Segment flags */
+  Elf64_Off	    p_offset;		/* Segment file offset */
+  Elf64_Addr	p_vaddr;		/* Segment virtual address */
+  Elf64_Addr	p_paddr;		/* Segment physical address */
+  Elf64_Xword	p_filesz;		/* Segment size in file */
+  Elf64_Xword	p_memsz;		/* Segment size in memory */
+  Elf64_Xword	p_align;		/* Segment alignment */
+} Elf64_Phdr;
+```
+
+- p_type：这个字段表明了这个段的类型，或者如何解释这个段的信息。
+
+| Name       | Value | Meaning                                                      |
+| ---------- | ----- | ------------------------------------------------------------ |
+| PT_NULL    | 0     | 未用                                                         |
+| PT_LOAD    | 1     | 表示这是一个可装载的段                                       |
+| PT_DYNAMIC | 2     | 表示这个段含有动态链接信息                                   |
+| PT_INTERP  | 3     | 指定了解释器(interpreter)的路径                              |
+| PT_NOTE    | 4     | 指定了辅助信息的位置和大小                                   |
+| PT_SHLIB   | 5     | 保留                                                         |
+| PT_PHDR    | 6     | 说明了程序头表在文件和内存映像中的位置和大小。该表项优先于其它可装载段表项 |
+
+- p_flags：与段权限相关的标志。
+
+| Name        | Value      | Meaning        |
+| ----------- | ---------- | -------------- |
+| PF_X        | 1          | 可执行         |
+| PF_W        | 2          | 可写           |
+| PF_R        | 4          | 可读           |
+| PF_MASKOS   | 0x0ff00000 | 由操作系统指定 |
+| PF_MASKPROC | 0xf0000000 | 由处理器指定   |
+
+- p_offset：此段在文件中的偏移量。
+
+- p_vaddr：此段在内存中的虚拟地址。
+- p_paddr：此段在与物理寻址相关的系统中的物理地址。
+- p_filesz：此段在文件中的大小。
+- p_memsz：此段在内存中的大小。
+- p_align：可装入的进程段必须具有 `p_vaddr` 和 `p_offset` 的同余值（以页面大小为模数）。此成员可提供一个值，用于在内存和文件中根据该值对齐各段。值 `0` 和 `1` 表示无需对齐。另外，`p_align` 应为 `2` 的正整数幂，并且 `p_vaddr` 应等于 `p_offset`（以 `p_align` 为模数）。
+
+
+
+## 3. PE格式
+
+PE格式用于Windows，是COFF格式的变体，所以PE也被称作PE/COFF，在被ELF取代前，一直被*nix使用。64位版本的PE叫做PE32+，与原PE格式区别很小。因为PE和ELF都源于COFF，所以PE和ELF有很多相似的地方。
+
+
+
+**PE32+格式**：
+
+![PE32+格式](assets/Practical Binary Analysis/image-20220730152624387.png)
+
+### 3.1 MS-DOS Header & Stub
+
+Microsoft为了兼容DOS，保留了MS-DOS Header。当PE刚问世的时候，为了让用户更清晰地从MS-DOS二进制格式过渡到PE格式，Microsoft让每个PE文件都以MS-DOS头作为开始，所以从狭义上讲，PE文件可以视为MS-DOS文件。MS-DOS Header最主要地作用就是描述如何加载并执行MS-DOS Stub。在MS-DOS环境下，用户执行PE文件时，运行的不是PE的主程序，而是MS-DOS stub里的指令。MS-DOS Header中的`e_lfanew`字段指出了PE Header在文件中的位置。
+
+
+
+### 3.2 PE/COFF头(PE/COFF Header)
+
+PE/COFF Header分为三个部分：
+
+- PE signature
+- PE file header
+- PE optional header
+
+
+
+#### 3.2.1 PE签名(PE Signature)
+
+与ELF Header中的`e_ident`中的幻数(magic value)相似，PE Signature的值为“PE\0\0"。表明这是一个PE格式文件。
+
+
+
+#### 3.2.2 PE文件头(PE File Header)
+
+PE File Header描述了文件的通用属性。
+
+
+
+##### IMAGE_FILE_HEADER
+
+```c
+typedef struct _IMAGE_FILE_HEADER {
+      WORD Machine;
+      WORD NumberOfSections;
+      DWORD TimeDateStamp;
+      DWORD PointerToSymbolTable;
+      DWORD NumberOfSymbols;
+      WORD SizeOfOptionalHeader;
+      WORD Characteristics;
+} IMAGE_FILE_HEADER,*PIMAGE_FILE_HEADER;
+```
+
+- Machine：类似ELF的`e_machine`，说明运行该文件需要的机器架构。
+- NumberOfSections：节头表中表项的数量。
+- TimeDateStamp：文件创建时间戳。
+- PointerToSymbolTable：符号表在文件中的偏移量。
+- NumberOfSymbols：符号表中表项的数量。
+- SizeOfOptionalHeader：PE Optional Header的大小。
+- Characteristics：描述了二进制文件的编码方式（大端 or 小端），是否是动态链接库，是否被去除了与执行无关的信息。
+
+
+
+#### 3.2.3 PE可选头(PE Optional Header)
+
+尽管名字里带有Optional，但是对于可执行文件来说，这部分是必须的，对于目标文件来说，这部分可以没有。
+
+
+
+##### IMAGE_OPTIONAL_HEADER64
+
+```c
+typedef struct _IMAGE_OPTIONAL_HEADER64 {
+      WORD Magic;                       // 机器型号，判断是32位或64位
+      BYTE MajorLinkerVersion;          // 链接器主要版本号
+      BYTE MinorLinkerVersion;          // 链接器次要版本号
+      DWORD SizeOfCode;                 // 代码节的总大小
+      DWORD SizeOfInitializedData;      // 已初始化数据节的大小
+      DWORD SizeOfUninitializedData;    // 未初始化数据节的大小
+      DWORD AddressOfEntryPoint;        // 程序入口地址(相对虚拟地址)
+      DWORD BaseOfCode;                 // 代码节的基地址(相对虚拟地址)
+      ULONGLONG ImageBase;              // 程序希望的基地址
+      DWORD SectionAlignment;           // 内存中的节对齐
+      DWORD FileAlignment;              // 文件中的节对齐
+      WORD MajorOperatingSystemVersion; // 操作系统主版本号
+      WORD MinorOperatingSystemVersion; // 操作系统次版本号
+      WORD MajorImageVersion;           // PE主版本号
+      WORD MinorImageVersion;           // PE次版本号
+      WORD MajorSubsystemVersion;       // 子系统主版本号
+      WORD MinorSubsystemVersion;       // 子系统次版本号
+      DWORD Win32VersionValue;          // 32位系统版本号值
+      DWORD SizeOfImage;                // 程序在内存中占用的大小
+      DWORD SizeOfHeaders;              // 
+      DWORD CheckSum;                   // 校验和
+      WORD Subsystem;                   // 文件的子系统
+      WORD DllCharacteristics;          // Dll文件属性
+      ULONGLONG SizeOfStackReserve;     // 预留的栈的大小
+      ULONGLONG SizeOfStackCommit;      // 立即申请的栈的大小
+      ULONGLONG SizeOfHeapReserve;      // 预留的堆的大小
+      ULONGLONG SizeOfHeapCommit;       // 立即申请的堆的大小
+      DWORD LoaderFlags;                // 调试相关的标志位
+      DWORD NumberOfRvaAndSizes;        // 数据目录结构的项目数量
+      IMAGE_DATA_DIRECTORY DataDirectory[IMAGE_NUMBEROF_DIRECTORY_ENTRIES]; // 数据目录
+} IMAGE_OPTIONAL_HEADER64,*PIMAGE_OPTIONAL_HEADER64;
+```
+
+
+
+#### 3.2.4 节(Sections)
+
+一些节与ELF文件中的节的作用和属性相似，比如`.text`, `.code`, `.bss`等。还有`.reloc`同`.rel`一样是重定位节，`.rdata`同`.rodata`是只读数据段。
+
+PE特有而ELF没有的节中比较重要的是`.edata`和`.idata`。`DataDirectory`中的`Export Directory`和`Import Directory`指向这两个节。`.idata`节说明了二进制文件从共享库导入了哪些符号，`.edata`节说明了二进制文件导出了哪些符号。因此，当解析外部符号引用时，会先检查共享库是否导出了该符号。这两节有时也会被合并到`.rdata`节。
+
+当加载器解析了依赖库之后，它会把解析的地址写到**导入地址表(IAT, Import Address Table)**中。`IAT`是`.idata`的一部分，初始时指向导入符号的名称或标识号，之后动态加载器会把它们替换成真实的指向导入函数或数据的指针。对外部函数的调用会被转换为对一个`thunk`的调用，`thunk`是对该外部函数的通过`IAT`的间接跳转。跳转的地址都存放在`.idata`的`Import Directory`中。
+
+下例中的代码是用`MinGW`编译，所以使用了`nop`指令填充，使得代码以8字节对齐，从而使得访问时只需要一次访存即可获取整个指令。而用`MSVC`编译后的PE文件会用`int3`指令填充，该指令用于调试，在没有调试器而执行时会导致程序崩溃，但是`jmp`指令跳转到其它地方，而不会执行其之后的`int3`指令，所以可以用`int3`指令在这里填充。
+
+```bash
+$ objdump -M intel -d 3_1_pe_header.exe
+
+...
+
+0000000000402a40 <vfprintf>:
+  402a40:       ff 25 16 59 00 00       jmp    QWORD PTR [rip+0x5916]        # 40835c <__imp_vfprintf>
+  402a46:       90                      nop
+  402a47:       90                      nop
+
+0000000000402a48 <strncmp>:
+  402a48:       ff 25 06 59 00 00       jmp    QWORD PTR [rip+0x5906]        # 408354 <__imp_strncmp>
+  402a4e:       90                      nop
+  402a4f:       90                      nop
+
+0000000000402a50 <strlen>:
+  402a50:       ff 25 f6 58 00 00       jmp    QWORD PTR [rip+0x58f6]        # 40834c <__imp_strlen>
+  402a56:       90                      nop
+  402a57:       90                      nop
+
+0000000000402a58 <signal>:
+  402a58:       ff 25 e6 58 00 00       jmp    QWORD PTR [rip+0x58e6]        # 408344 <__imp_signal>
+  402a5e:       90                      nop
+  402a5f:       90                      nop
+
+0000000000402a60 <puts>:
+  402a60:       ff 25 d6 58 00 00       jmp    QWORD PTR [rip+0x58d6]        # 40833c <__imp_puts>
+  402a66:       90                      nop
+  402a67:       90                      nop
+ 
+ ...
+ 
+ $ objdump -h 3_1_pe_header.exe
+ 
+3_1_pe_header.exe:     file format pei-x86-64
+
+Sections:
+Idx Name          Size      VMA               LMA               File off  Algn
+  0 .text         00001cc8  0000000000401000  0000000000401000  00000400  2**4
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE, DATA
+  1 .data         000000d0  0000000000403000  0000000000403000  00002200  2**4
+                  CONTENTS, ALLOC, LOAD, DATA
+  2 .rdata        000004d0  0000000000404000  0000000000404000  00002400  2**5
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  3 .pdata        00000270  0000000000405000  0000000000405000  00002a00  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  4 .xdata        000001f4  0000000000406000  0000000000406000  00002e00  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  5 .bss          00000980  0000000000407000  0000000000407000  00000000  2**5
+                  ALLOC
+  6 .idata        0000076c  0000000000408000  0000000000408000  00003000  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+  7 .CRT          00000068  0000000000409000  0000000000409000  00003800  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+  8 .tls          00000010  000000000040a000  000000000040a000  00003a00  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+  9 .debug_aranges 00000050  000000000040b000  000000000040b000  00003c00  2**4
+                  CONTENTS, READONLY, DEBUGGING
+ 10 .debug_info   00001f08  000000000040c000  000000000040c000  00003e00  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 11 .debug_abbrev 00000149  000000000040e000  000000000040e000  00005e00  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 12 .debug_line   00000222  000000000040f000  000000000040f000  00006000  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 13 .debug_frame  00000048  0000000000410000  0000000000410000  00006400  2**3
+                  CONTENTS, READONLY, DEBUGGING
+ 14 .debug_str    0000009b  0000000000411000  0000000000411000  00006600  2**0
+                  CONTENTS, READONLY, DEBUGGING
+```
+
 
 
 ## 参考
 
+1. 《编译系统透视：图解编译原理》，第8章-预处理
+2. [Debugging with Symbols - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/dxtecharts/debugging-with-symbols)
 1. [Tool Interface Standard (TIS) Executable and Linking Format (ELF)  Specification Version 1.2](https://refspecs.linuxfoundation.org/elf/elf.pdf)
 2. [ELF 应用程序二进制接口 - 链接程序和库指南](https://docs.oracle.com/cd/E26926_01/html/E25910/glcfv.html#scrolltoc)
 3. 《程序员的自我修养---链接、装载与库》
+
 
