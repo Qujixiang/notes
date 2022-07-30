@@ -8,7 +8,7 @@
 
 C语言源代码转换为二进制文件需要四个步骤：**预处理**、**编译**、**汇编**、**链接**。
 
-![C编译过程](assets/Practical Binary Analysis/image-20220702135143990.png)
+![C编译过程](assets/Practical-Binary-Analysis/image-20220702135143990.png)
 
 #### 1.1.1 预处理阶段
 
@@ -146,7 +146,7 @@ $ objdump -M intel -d a.out
 
 ## 1.4 加载并执行二进制文件
 
-![在Linux上加载ELF格式的二进制文件](assets/Practical Binary Analysis/image-20220710192640386.png)
+![在Linux上加载ELF格式的二进制文件](assets/Practical-Binary-Analysis/image-20220710192640386.png)
 
 运行二进制文件的过程：
 
@@ -173,7 +173,7 @@ ELF (Executable and Linkable Format，可执行和链接格式)，ELF包含四�
 
 **64位ELF二进制文件概览**
 
-![64位ELF二进制文件概览](assets/Practical Binary Analysis/image-20220729094002496.png)
+![64位ELF二进制文件概览](assets/Practical-Binary-Analysis/image-20220729094002496.png)
 
 
 
@@ -789,7 +789,7 @@ PE格式用于Windows，是COFF格式的变体，所以PE也被称作PE/COFF，�
 
 **PE32+格式**：
 
-![PE32+格式](assets/Practical Binary Analysis/image-20220730152624387.png)
+![PE32+格式](assets/Practical-Binary-Analysis/image-20220730152624387.png)
 
 ### 3.1 MS-DOS Header & Stub
 
@@ -977,5 +977,4 @@ Idx Name          Size      VMA               LMA               File off  Algn
 1. [Tool Interface Standard (TIS) Executable and Linking Format (ELF)  Specification Version 1.2](https://refspecs.linuxfoundation.org/elf/elf.pdf)
 2. [ELF 应用程序二进制接口 - 链接程序和库指南](https://docs.oracle.com/cd/E26926_01/html/E25910/glcfv.html#scrolltoc)
 3. 《程序员的自我修养---链接、装载与库》
-
 
