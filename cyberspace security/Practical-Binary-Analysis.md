@@ -872,7 +872,7 @@ typedef struct _IMAGE_OPTIONAL_HEADER64 {
       WORD MinorSubsystemVersion;       // 子系统次版本号
       DWORD Win32VersionValue;          // 32位系统版本号值
       DWORD SizeOfImage;                // 程序在内存中占用的大小
-      DWORD SizeOfHeaders;              // 
+      DWORD SizeOfHeaders;              // MS-DOS stub, PE头和节头之和向上取整到FileAlignment的整数倍
       DWORD CheckSum;                   // 校验和
       WORD Subsystem;                   // 文件的子系统
       WORD DllCharacteristics;          // Dll文件属性
@@ -970,6 +970,1034 @@ Idx Name          Size      VMA               LMA               File off  Algn
 
 
 
+## 4. 用libbfd构建二进制加载器
+
+BFD是Binary format descriptor的缩写，即二进制文件格式描述符，是很多可执行文件相关二进制工具（如nm、objdump、ar、as等命令）的基础库。bfd库可以用来分析、创建、修改二进制文件，支持多种平台（如x86、arm等）及多种二进制格式（如elf、core、so等）。
+
+
+
+### 二进制加载接口
+
+首先创建一个头文件，定义相关的类和函数。引入要使用的头文件，并且定义3个类名。定义一个Binary类，作为整个二进制文件的抽象，定义Section和Symbol类，作为节和符号的抽象。
+
+```c
+#include <stdint.h>
+#include <string>
+#include <vector>
+
+class Symbol;
+class Section;
+class Binary;
+```
+
+
+
+### Symbol
+
+Symbol类与二进制文件的符号相关，ELF文件中的符号表包括局部和全局变量、函数、重定位表达式及对象等，此处只解析函数符号。
+
+```c
+class Symbol {
+    public:
+        enum SymbolType {
+            SYM_TYPE_UKN = 0,
+            SYM_TYPE_FUNC = 1
+        };
+        
+        Symbol(): type(SYM_TYPE_UKN), addr(0) {}
+
+        SymbolType type;
+        std::string name;
+        uint64_t addr;
+};
+```
+
+
+
+### Section
+
+Section类围绕二进制文件的节进行实现。例如Linux上的ELF格式文件，由一系列二进制节组织而成。使用readelf都会显示相关的基本信息，包括节头表里的索引、节的名称和类型，除此以外，还可以查看节的虚拟地址、文件偏移及大小、节的标志等等信息。
+
+```c
+class Section {
+    public:
+        enum SectionType {
+            SEC_TYPE_NONE = 0,
+            SEC_TYPE_CODE = 1,
+            SEC_TYPE_DATA = 2
+        };
+
+        Section(): binary(NULL), type(SEC_TYPE_NONE), vma(0), size(0), bytes(NULL) {}
+    
+        Binary *binary;
+        std::string name;
+        SectionType type;
+        uint64_t vma;
+        uint64_t size;
+        uint8_t *bytes;
+};
+```
+
+
+
+### Binary
+
+这个类作为整个二进制文件的抽象，其中包含了二进制文件的文件名、类型、平台架构、位宽、入口点地址、节及符号。
+
+```c
+class Binary {
+    public:
+        enum BinaryType {
+            BIN_TYPE_AUTO = 0,
+            BIN_TYPE_ELF = 1,
+            BIN_TYPE_PE = 2
+        };
+
+        enum BinaryArch {
+            ARCH_NONE = 0,
+            ARCH_X86 = 1
+        };
+
+        Binary(): type(BIN_TYPE_AUTO), arch(ARCH_NONE), bits(0), entry(0) {}
+
+        std::string filename;
+        BinaryType type;
+        std::string type_str;
+        BinaryArch arch;
+        std::string arch_str;
+        unsigned bits;
+        uint64_t entry;
+        std::vector<Section> sections;
+        std::vector<Symbol> symbols;
+};
+```
+
+
+
+### 加载二进制文件
+
+定义加载器的两个入口函数`load_binary`和`unload_binary`函数。用于加载二进制文件，加载完毕后释放二进制文件的内存。`load_binary`解析由文件名指定的二进制文件，并将其加载到`Binary`对象中，其中调用了`load_binary_bfd`函数，将在后续实现。
+
+`unload_binary`负责释放资源，实际上就是将`Binary`中`malloc`出的内存空间都释放。每个`Section`对象都要开辟一段空间来保存原始字节，将`bytes`成员释放掉即可。
+
+```c
+int load_binary(std::string &fname, Binary *bin, Binary::BinaryType type) {
+    return load_binary_bfd(fname, bin, type);
+}
+
+void unload_binary(Binary *bin) {
+    size_t i;
+    Section *sec;
+
+    for (i = 0; i < bin->sections.size(); i++) {
+        sec = &bin->sections[i];
+        if (sec->bytes) {
+            free(sec->bytes);
+        }
+    }
+}
+```
+
+
+
+### 打开二进制文件
+
+如下实现了一个`open_bfd`函数，使用`libbfd`通过文件名(`fname`参数)确定二进制文件的属性，并将其打开，然后返回该二进制文件的句柄。事先要使用`bfd_init`函数来初始化内部结构，`open_inited`标识是否已经初始化。通过调用`bfd_openr`函数以文件名打开二进制文件，该函数第二个参数指定了文件类型，传入`NULL`则表示让`libbfd`自动确定二进制文件类型。`bfd_openr`返回一个指向`bfd`类型的文件句柄指针，这是`libbfd`的根数据结构，如果打开发生错误，则为`NULL`。使用`bfd_get_error`函数得到最近的错误类型，返回`bfd_error_type`对象，与预定义的错误标识符进行比较。
+
+```c
+static bfd* open_bfd(std::string &fname) {
+    static int bfd_inited = 0;
+    bfd *bfd_h;
+
+    if (!bfd_inited) {
+        bfd_init();
+        bfd_inited = 1;
+    }
+
+    bfd_h = bfd_openr(fname.c_str(), NULL);
+    if (!bfd_h) {
+        fprintf(stderr, "failed to open binary '%s' (%s)\n",
+            fname.c_str(), bfd_errmsg(bfd_get_error()));
+        return NULL;
+    }
+
+    if (!bfd_check_format(bfd_h, bfd_object)) {
+        fprintf(stderr, "file '%s' does not look like an executable (%s)\n",
+            fname.c_str(), bfd_errmsg(bfd_get_error()));
+        return NULL;
+    }
+
+    bfd_set_error(bfd_error_no_error);
+
+    if (bfd_get_flavour(bfd_h) == bfd_target_unknown_flavour) {
+        fprintf(stderr, "unrecognized format for binary '%s' (%s)\n",
+            fname.c_str(), bfd_errmsg(bfd_get_error()));
+        return NULL;
+    }
+
+    return bfd_h;
+}
+```
+
+获得文件句柄后，可用`bfd_check_format`函数检查二进制文件格式。该函数传入`bfd`句柄和`bfd_format`值。
+
+`bfd_format`定义如下:
+
+```c
+typedef enum bfd_format
+{
+  bfd_unknown = 0,	/* File format is unknown.  */
+  bfd_object,		/* Linker/assembler/compiler output.  */
+  bfd_archive,		/* Object archive file.  */
+  bfd_core,		    /* Core dump.  */
+  bfd_type_end		/* Marks the end; don't use it!  */
+} bfd_format;
+```
+
+`bfd_object`对应了可执行文件、可重定位对象和共享库。
+
+最后通过`bfd_get_flavour`函数检查二进制文件的格式。
+
+```c
+enum bfd_flavour
+{
+  bfd_target_unknown_flavour,
+  bfd_target_aout_flavour,
+  bfd_target_coff_flavour,
+  bfd_target_ecoff_flavour,
+  bfd_target_xcoff_flavour,
+  bfd_target_elf_flavour,
+  bfd_target_tekhex_flavour,
+  bfd_target_srec_flavour,
+  bfd_target_verilog_flavour,
+  bfd_target_ihex_flavour,
+  bfd_target_som_flavour,
+  bfd_target_os9k_flavour,
+  bfd_target_versados_flavour,
+  bfd_target_msdos_flavour,
+  bfd_target_ovax_flavour,
+  bfd_target_evax_flavour,
+  bfd_target_mmo_flavour,
+  bfd_target_mach_o_flavour,
+  bfd_target_pef_flavour,
+  bfd_target_pef_xlib_flavour,
+  bfd_target_sym_flavour
+};
+```
+
+`bfd_target_coff_flavour`是微软的PE文件格式，`bfd_target_elf_flavour`是ELF文件格式，如果二进制格式未知，就返回`bfd_target_unknown_flavour`。
+
+通过上述流程，可以打开一个有效的二进制文件。
+
+
+
+### 解析基本属性
+
+将二进制文件中的一些重要属性加载到Binary中。
+
+```c
+static int load_binary_bfd(std::string &fname, Binary *bin, Binary::BinaryType type) {
+    int ret;
+    bfd *bfd_h;
+    const bfd_arch_info_type *bfd_info;
+
+    bfd_h = open_bfd(fname);
+    if (!bfd_h) {
+        goto fail;
+    }
+
+    bin->filename = std::string(fname);
+    bin->entry = bfd_get_start_address(bfd_h);
+    bin->type_str = std::string(bfd_h->xvec->name);
+    switch(bfd_h->xvec->flavour) {
+        case bfd_target_elf_flavour:
+            bin->type = Binary::BIN_TYPE_ELF;
+            break;
+        case bfd_target_coff_flavour:
+            bin->type = Binary::BIN_TYPE_PE;
+            break;
+        case bfd_target_unknown_flavour:
+        default:
+            fprintf(stderr, "unsupported binary type (%s)\n", bfd_h->xvec->name);
+            goto fail;
+    }
+
+    bfd_info = bfd_get_arch_info(bfd_h);
+    bin->arch_str = std::string(bfd_info->printable_name);
+    switch(bfd_info->mach) {
+        case bfd_mach_i386_i386:
+            bin->arch = Binary::ARCH_X86;
+            bin->bits = 32;
+            break;
+        case bfd_mach_x86_64:
+            bin->arch = Binary::ARCH_X86;
+            bin->bits = 64;
+            break;
+        default: 
+            fprintf(stderr, "unsupported architecture (%s)\n",
+                bfd_info->printable_name);
+            goto fail;
+    }
+
+    load_symbols_bfd(bfd_h, bin);
+    load_dynsym_bfd(bfd_h, bin);
+    if (load_sections_bfd(bfd_h, bin) < 0) goto fail;
+
+    ret = 0;
+    goto cleanup;
+
+fail:
+    ret = -1;
+    
+cleanup:
+    if (bfd_h) bfd_close(bfd_h);
+
+    return ret;
+}
+```
+
+`load_binary_bfd`函数中，首先使用`open_bfd`函数打开fname参数指定的二进制文件，并获得该二进制文件的bfd句柄。bin是Binary指针，是二进制文件的抽象。获取一些基本信息，对该对象进行赋值。用`bfd_get_start_address`来获取入口点地址，即返回了bfd对象中start_address字段的值。此处bfd_h中的xvec实际上指向一个bfd_target结构，其中就包含了二进制文件的各种信息：
+
+```c
+typedef struct bfd_target
+{
+  /* Identifies the kind of target, e.g., SunOS4, Ultrix, etc.  */
+  char *name;
+ 
+ /* The "flavour" of a back end is a general indication about
+    the contents of a file.  */
+  enum bfd_flavour flavour;
+ 
+  /* The order of bytes within the data area of a file.  */
+  enum bfd_endian byteorder;
+ 
+ /* The order of bytes within the header parts of a file.  */
+  enum bfd_endian header_byteorder;
+ 
+  /* A mask of all the flags which an executable may have set -
+     from the set <<BFD_NO_FLAGS>>, <<HAS_RELOC>>, ...<<D_PAGED>>.  */
+  flagword object_flags;
+ 
+ /* A mask of all the flags which a section may have set - from
+    the set <<SEC_NO_FLAGS>>, <<SEC_ALLOC>>, ...<<SET_NEVER_LOAD>>.  */
+  flagword section_flags;
+ 
+ /* The character normally found at the front of a symbol.
+    (if any), perhaps `_'.  */
+  char symbol_leading_char;
+ 
+ /* The pad character for file names within an archive header.  */
+  char ar_pad_char;
+ 
+  /* The maximum number of characters in an archive header.  */
+  unsigned char ar_max_namelen;
+ 
+  /* How well this target matches, used to select between various
+     possible targets when more than one target matches.  */
+  unsigned char match_priority;
+ 
+  /* Entries for byte swapping for data. These are different from the
+     other entry points, since they don't take a BFD as the first argument.
+     Certain other handlers could do the same.  */
+  bfd_uint64_t   (*bfd_getx64) (const void *);
+  bfd_int64_t    (*bfd_getx_signed_64) (const void *);
+  void           (*bfd_putx64) (bfd_uint64_t, void *);
+  bfd_vma        (*bfd_getx32) (const void *);
+  bfd_signed_vma (*bfd_getx_signed_32) (const void *);
+  void           (*bfd_putx32) (bfd_vma, void *);
+  bfd_vma        (*bfd_getx16) (const void *);
+  bfd_signed_vma (*bfd_getx_signed_16) (const void *);
+  void           (*bfd_putx16) (bfd_vma, void *);
+ 
+  /* Byte swapping for the headers.  */
+  bfd_uint64_t   (*bfd_h_getx64) (const void *);
+  bfd_int64_t    (*bfd_h_getx_signed_64) (const void *);
+  void           (*bfd_h_putx64) (bfd_uint64_t, void *);
+  bfd_vma        (*bfd_h_getx32) (const void *);
+  bfd_signed_vma (*bfd_h_getx_signed_32) (const void *);
+  void           (*bfd_h_putx32) (bfd_vma, void *);
+  bfd_vma        (*bfd_h_getx16) (const void *);
+  bfd_signed_vma (*bfd_h_getx_signed_16) (const void *);
+  void           (*bfd_h_putx16) (bfd_vma, void *);
+  ......
+}
+```
+
+使用`bfd_get_arch_info`获取到平台架构信息，返回一个结构体：
+
+```c
+typedef struct bfd_arch_info
+{
+  int bits_per_word;
+  int bits_per_address;
+  int bits_per_byte;
+  enum bfd_architecture arch;
+  unsigned long mach;
+  const char *arch_name;
+  const char *printable_name;
+  unsigned int section_align_power;
+  /* TRUE if this is the default machine for the architecture.
+     The default arch should be the first entry for an arch so that
+     all the entries for that arch can be accessed via <<next>>.  */
+  bfd_boolean the_default;
+  const struct bfd_arch_info * (*compatible) (const struct bfd_arch_info *,
+                                              const struct bfd_arch_info *);
+ 
+  bfd_boolean (*scan) (const struct bfd_arch_info *, const char *);
+ 
+  /* Allocate via bfd_malloc and return a fill buffer of size COUNT.  If
+     IS_BIGENDIAN is TRUE, the order of bytes is big endian.  If CODE is
+     TRUE, the buffer contains code.  */
+  void *(*fill) (bfd_size_type count, bfd_boolean is_bigendian,
+                 bfd_boolean code);
+ 
+  const struct bfd_arch_info *next;
+} bfd_arch_info_type;
+```
+
+其中的mach字段标识了平台架构，如果该字段为`bfd_mach_i386_i386`，说明它是一个32位x86架构的二进制文件，则在Binary设置相应的字段，如果mach为`bfd_mach_x86_64`，说明它是一个64位x86架构下的二进制文件，则在Binary中设置字段。
+
+
+
+### 加载静态符号
+
+加载二进制文件的静态符号表。
+
+```c
+static int load_symbols_bfd(bfd *bfd_h, Binary *bin) {
+    int ret = 0;
+    long n, nsyms, i;
+    asymbol **bfd_symtab;
+    Symbol *sym;
+    
+    n = bfd_get_symtab_upper_bound(bfd_h);
+    if (n < 0) {
+        fprintf(stderr, "failed to read symtab (%s)\n",
+            bfd_errmsg(bfd_get_error()));
+        goto fail;
+    } else if (n) {
+        bfd_symtab = (asymbol**)malloc(n);
+        if (!bfd_symtab) {
+            fprintf(stderr, "out of memory\n");
+            goto fail;
+        }
+        nsyms = bfd_canonicalize_symtab(bfd_h, bfd_symtab);
+        if (nsyms < 0) {
+            fprintf(stderr, "failed to read symtab (%s)\n",
+                bfd_errmsg(bfd_get_error()));
+            goto fail;
+        }
+        for (i = 0; i < nsyms; i++) {
+            if (bfd_symtab[i]->flags & BSF_FUNCTION) {
+                bin->symbols.push_back(Symbol());
+                sym = &bin->symbols.back();
+                sym->type = Symbol::SYM_TYPE_FUNC;
+                sym->name = std::string(bfd_symtab[i]->name);
+                sym->addr = bfd_asymbol_value(bfd_symtab[i]);
+            }
+        }
+    }
+
+    ret = 0;
+    goto cleanup;
+
+fail:
+    ret = -1;
+
+cleanup:
+    if (bfd_symtab) free(bfd_symtab);
+
+    return ret;
+}
+```
+
+`load_symbols_bfd`负责填充asymbol指针数组，然后将信息复制到Binary对象中。
+
+`load_symbols_bfd`的输入参数是bfd句柄和用于存储符号信息的Binary对象，因此要开辟内存空间来存放符号指针。`bfd_get_symtab_upper_bound`函数会返回要分配的字节数，使用`malloc`函数来为代表符号表的二级指针分配内存空间，可以用`bfd_canonicalize_symtab`来填充符号表，将bfd句柄和要填充的符号表(asymbol**)作为参数，返回符号个数，如果返回的是负数则说明发生了错误。
+
+此处只对函数符号感兴趣，通过检查`BSF_FUNCTION`标志来判断符号是否为一个函数符号，如果是则放入Binary对象中symbols中，并获取其起始地址，赋值给对应的Symbol对象。将数据加载到Symbol对象中后就释放原来为符号表申请的空间。
+
+
+
+### 加载动态空间
+
+从动态符号表中加载符号。
+
+```c
+static int load_dynsym_bfd(bfd *bfd_h, Binary *bin) {
+    int ret = 0;
+    long n, nsyms, i;
+    asymbol **bfd_dynsym;
+    Symbol *sym;
+    
+    n = bfd_get_dynamic_symtab_upper_bound(bfd_h);
+    if (n < 0) {
+        fprintf(stderr, "failed to read symtab (%s)\n",
+            bfd_errmsg(bfd_get_error()));
+        goto fail;
+    } else if (n) {
+        bfd_dynsym = (asymbol**)malloc(n);
+        if (!bfd_dynsym) {
+            fprintf(stderr, "out of memory\n");
+            goto fail;
+        }
+        nsyms = bfd_canonicalize_dynamic_symtab(bfd_h, bfd_dynsym);
+        if (nsyms < 0) {
+            fprintf(stderr, "failed to read symtab (%s)\n",
+                bfd_errmsg(bfd_get_error()));
+            goto fail;
+        }
+        for (i = 0; i < nsyms; i++) {
+            if (bfd_dynsym[i]->flags & BSF_FUNCTION) {
+                bin->symbols.push_back(Symbol());
+                sym = &bin->symbols.back();
+                sym->type = Symbol::SYM_TYPE_FUNC;
+                sym->name = std::string(bfd_dynsym[i]->name);
+                sym->addr = bfd_asymbol_value(bfd_dynsym[i]);
+            }
+        }
+    }
+
+    ret = 0;
+    goto cleanup;
+
+fail:
+    ret = -1;
+
+cleanup:
+    if (bfd_dynsym) free(bfd_dynsym);
+
+    return ret;
+}
+```
+
+与加载静态符号的流程相似，首先获取要分配的字节数，然后使用`malloc`进行内存空间的分配。使用`bfd_canonicalize_dynamic_symtab`来填充符号表，返回符号数。
+
+在for循环中遍历符号表，判断是否为函数符号，如果是则存入Binary对象中
+
+
+
+### 加载节信息
+
+加载二进制文件的节。
+
+```c
+static int load_sections_bfd(bfd* bfd_h, Binary *bin) {
+    flagword bfd_flags;
+    uint64_t vma, size;
+    const char *secname;
+    asection *bfd_sec;
+    Section *sec;
+    Section::SectionType sectype;
+
+    for (bfd_sec = bfd_h->sections; bfd_sec; bfd_sec = bfd_sec->next) {
+        bfd_flags = bfd_sec->flags;
+
+        sectype = Section::SEC_TYPE_NONE;
+        if (bfd_flags & SEC_CODE) {
+            sectype = Section::SEC_TYPE_CODE;
+        } else if (bfd_flags & SEC_DATA) {
+            sectype = Section::SEC_TYPE_DATA;
+        } else {
+            continue;
+        }
+        vma = bfd_section_vma(bfd_sec);
+        size = bfd_section_size(bfd_sec);
+        secname = bfd_section_name(bfd_sec);
+        if (!secname) secname = "<unnamed>";
+
+        bin->sections.push_back(Section());
+        sec = &bin->sections.back();
+        sec->binary = bin;
+        sec->name = std::string(secname);
+        sec->type = sectype;
+        sec->vma = vma;
+        sec->size = size;
+        sec->bytes = (uint8_t*)malloc(size);
+        if (!sec->bytes) {
+            fprintf(stderr, "out of memory\n");
+            return -1;
+        }
+
+        if (!bfd_get_section_contents(bfd_h, bfd_sec, sec->bytes, 0, size)) {
+            fprintf(stderr, "failed to read section '%s' (%s)\n",
+                secname, bfd_errmsg(bfd_get_error()));
+            return -1;
+        }
+    }
+
+    return 0;
+}
+```
+
+libbfd使用一个名为asection的数据结构来保存节信息，也称为bfd_section结构。在内部，libbfd通过asection链表表示所有的节。遍历这个链表，先使用`bfd_get_section_flags`函数来获取标志位，通过检查这个标志位，来判断节的类型。
+
+接下来要获取节的虚拟地址、大小、名称及其原始字节数。使用`bfd_section_vma`函数来获取节的虚拟基址，`bfd_section_size`函数返回节的大小，`bfd_section_name`函数返回节的名称。Section对象中的bytes存储节的原始字节，使用`malloc`为Section对象的bytes指针开辟空间。`bfd_get_section_contents`函数将节的所有原始字节数据复制到Section对象的bytes中。
+
+
+
+###  练习
+
+#### 十六进制形式输出指定段
+
+参照`xxd`、`objdump`的输出形式，按照`虚拟内存地址:十六进制 字符`的形式对段的内容进行输出。
+
+```c
+for (i = 0; (i < bin.sections.size()) && (bin.sections[i].name != argv[2]); i++) {}
+if (i == bin.sections.size()) {
+    printf("\nThere is not a section called '%s', please check it and try again!\n", argv[2]);
+    goto cleanup;
+}
+sec = &bin.sections[i];
+printf("\n%s(%dbytes):\n", argv[2], sec->size);
+for (size = 0, vma = sec->vma; size < sec->size; size += 16, vma += 16) {
+    printf("  0x%016jx: ", vma);
+    if (sec->size - size < 16) {
+        for (i = 0; i < sec->size - size; i++) {
+            printf("%02x%s", sec->bytes[size + i], i % 2 ? " " : "");
+        }
+        for (; i < 16; i++) {
+            printf("  %s", i % 2 ? " " : "");
+        }
+        for (i = 0; i < sec->size - size; i++) {
+            if (sec->bytes[size + i] >= 0x21 && sec->bytes[size + i] <= 0x7e) {
+                printf("%c", sec->bytes[size + i]);
+            } else {
+                printf(".");
+            }
+        }
+    } else {
+        for (i = 0; i < 16; i++) {
+            printf("%02x%s", sec->bytes[size + i], i % 2 ? " " : "");
+        }
+        for (i = 0; i < 16; i++) {
+            if (sec->bytes[size + i] >= 0x21 && sec->bytes[size + i] <= 0x7e) {
+                printf("%c", sec->bytes[size + i]);
+            } else {
+                printf(".");
+            }
+        }
+    }
+    printf("\n");
+}
+```
+
+
+
+#### 检查弱符号
+
+对于C/C++语言来说，编译器默认函数和初始化了的全局变量为**强符号**，未初始化的全局变量为**弱符号**。链接器会按照如下规则处理与选择被多次定义的全局符号：
+
+1. 不允许强符号多次被定义。
+2. 如果一个符号在某个目标文件中是强符号，在其它文件中是弱符号，那么选择强符号。
+3. 如果一个符号在所有目标文件中都是弱符号，那么选择其中占用空间最大的一个。
+
+在`bfd.h`中，`bfd_symbol`结构体的定义如下：
+
+```c
+typedef struct bfd_symbol {
+    struct bfd *the_bfd;
+    const char *name;
+    symvalue value;
+    flagword flags;
+    struct bfd_section *section;
+    union {
+      void *p;
+      bfd_vma i;
+    } udata;
+} asymbol;
+```
+
+其中，关于标志位`flags`的宏定义有：
+
+```c
+/* Attributes of a symbol.  */
+#define BSF_NO_FLAGS            0
+
+  /* The symbol has local scope; <<static>> in <<C>>. The value
+     is the offset into the section of the data.  */
+#define BSF_LOCAL               (1 << 0)
+
+  /* The symbol has global scope; initialized data in <<C>>. The
+     value is the offset into the section of the data.  */
+#define BSF_GLOBAL              (1 << 1)
+
+  /* The symbol has global scope and is exported. The value is
+     the offset into the section of the data.  */
+#define BSF_EXPORT              BSF_GLOBAL /* No real difference.  */
+
+  /* A normal C symbol would be one of:
+     <<BSF_LOCAL>>, <<BSF_UNDEFINED>> or <<BSF_GLOBAL>>.  */
+
+  /* The symbol is a debugging record. The value has an arbitrary
+     meaning, unless BSF_DEBUGGING_RELOC is also set.  */
+#define BSF_DEBUGGING           (1 << 2)
+
+  /* The symbol denotes a function entry point.  Used in ELF,
+     perhaps others someday.  */
+#define BSF_FUNCTION            (1 << 3)
+
+  /* Used by the linker.  */
+#define BSF_KEEP                (1 << 5)
+
+  /* An ELF common symbol.  */
+#define BSF_ELF_COMMON          (1 << 6)
+
+  /* A weak global symbol, overridable without warnings by
+     a regular global symbol of the same name.  */
+#define BSF_WEAK                (1 << 7)
+
+  /* This symbol was created to point to a section, e.g. ELF's
+     STT_SECTION symbols.  */
+#define BSF_SECTION_SYM         (1 << 8)
+
+  /* The symbol used to be a common symbol, but now it is
+     allocated.  */
+#define BSF_OLD_COMMON          (1 << 9)
+
+  /* In some files the type of a symbol sometimes alters its
+     location in an output file - ie in coff a <<ISFCN>> symbol
+     which is also <<C_EXT>> symbol appears where it was
+     declared and not at the end of a section.  This bit is set
+     by the target BFD part to convey this information.  */
+#define BSF_NOT_AT_END          (1 << 10)
+
+  /* Signal that the symbol is the label of constructor section.  */
+#define BSF_CONSTRUCTOR         (1 << 11)
+
+  /* Signal that the symbol is a warning symbol.  The name is a
+     warning.  The name of the next symbol is the one to warn about;
+     if a reference is made to a symbol with the same name as the next
+     symbol, a warning is issued by the linker.  */
+#define BSF_WARNING             (1 << 12)
+
+  /* Signal that the symbol is indirect.  This symbol is an indirect
+     pointer to the symbol with the same name as the next symbol.  */
+#define BSF_INDIRECT            (1 << 13)
+
+  /* BSF_FILE marks symbols that contain a file name.  This is used
+     for ELF STT_FILE symbols.  */
+#define BSF_FILE                (1 << 14)
+
+  /* Symbol is from dynamic linking information.  */
+#define BSF_DYNAMIC             (1 << 15)
+
+  /* The symbol denotes a data object.  Used in ELF, and perhaps
+     others someday.  */
+#define BSF_OBJECT              (1 << 16)
+
+  /* This symbol is a debugging symbol.  The value is the offset
+     into the section of the data.  BSF_DEBUGGING should be set
+     as well.  */
+#define BSF_DEBUGGING_RELOC     (1 << 17)
+
+  /* This symbol is thread local.  Used in ELF.  */
+#define BSF_THREAD_LOCAL        (1 << 18)
+
+  /* This symbol represents a complex relocation expression,
+     with the expression tree serialized in the symbol name.  */
+#define BSF_RELC                (1 << 19)
+
+  /* This symbol represents a signed complex relocation expression,
+     with the expression tree serialized in the symbol name.  */
+#define BSF_SRELC               (1 << 20)
+
+  /* This symbol was created by bfd_get_synthetic_symtab.  */
+#define BSF_SYNTHETIC           (1 << 21)
+
+  /* This symbol is an indirect code object.  Unrelated to BSF_INDIRECT.
+     The dynamic linker will compute the value of this symbol by
+     calling the function that it points to.  BSF_FUNCTION must
+     also be also set.  */
+#define BSF_GNU_INDIRECT_FUNCTION (1 << 22)
+  /* This symbol is a globally unique data object.  The dynamic linker
+     will make sure that in the entire process there is just one symbol
+     with this name and type in use.  BSF_OBJECT must also be set.  */
+#define BSF_GNU_UNIQUE          (1 << 23)
+
+  /* This section symbol should be included in the symbol table.  */
+#define BSF_SECTION_SYM_USED    (1 << 24)
+```
+
+其中的`BSF_WEAK`即为弱符号标志。可以使用如下代码判断一个符号是否为弱符号：
+
+```c
+if (sym->flags & BSF_WEAK) {
+    // 该符号是弱符号
+} else {
+    // 该符号不是弱符号
+}
+```
+
+
+
+#### 打印数据符号
+
+要区分全局和局部数据，以及函数符号，只需要检查符号的标志位：
+
+- `BSF_LOCAL`：C语言中的`static`修饰的局部符号。
+- `BSF_GLOBAL`：已初始化的全局符号。
+- `BSF_FUNCTION`：指向函数入口点的函数符号。
+- `BSF_OBJECT`：数据对象符号。
+
+现将数据类型加入到`Symbol`类中（以下`+`号表示新增的代码，`-`表示删除了的代码）：
+
+```c
+class Symbol {
+    public:
+        enum SymbolType {
+             SYM_TYPE_UKN = 0,
+             SYM_TYPE_FUNC = 1,
++            SYM_TYPE_DATA = 2
+        };
+        
+        Symbol(): type(SYM_TYPE_UKN), addr(0) {}
+
+        SymbolType type;
+        std::string name;
+        uint64_t addr;
+};
+```
+
+加入分析`ELF`文件时对数据符号类型的判断代码：
+
+```c
+static int load_symbols_bfd(bfd *bfd_h, Binary *bin) {
+            ...
+            if (bfd_symtab[i]->flags & BSF_FUNCTION) {
+                bin->symbols.push_back(Symbol());
+                sym = &bin->symbols.back();
+                sym->type = Symbol::SYM_TYPE_FUNC;
+                sym->name = std::string(bfd_symtab[i]->name);
+                sym->addr = bfd_asymbol_value(bfd_symtab[i]);
++            } else if (bfd_symtab[i]->flags & BSF_OBJECT) {
++                bin->symbols.push_back(Symbol());
++                sym = &bin->symbols.back();
++                sym->type = Symbol::SYM_TYPE_DATA;
++                sym->name = std::string(bfd_symtab[i]->name);
++                sym->addr = bfd_asymbol_value(bfd_symtab[i]);
+            }
+            ...
+}
+
+static int load_dynsym_bfd(bfd *bfd_h, Binary *bin) {
+            ...
+            if (bfd_dynsym[i]->flags & BSF_FUNCTION) {
+                bin->symbols.push_back(Symbol());
+                sym = &bin->symbols.back();
+                sym->type = Symbol::SYM_TYPE_FUNC;
+                sym->name = std::string(bfd_dynsym[i]->name);
+                sym->addr = bfd_asymbol_value(bfd_dynsym[i]);
++            } else if (bfd_dynsym[i]->flags & BSF_OBJECT) {
++                bin->symbols.push_back(Symbol());
++                sym = &bin->symbols.back();
++                sym->type = Symbol::SYM_TYPE_DATA;
++                sym->name = std::string(bfd_dynsym[i]->name);
++                sym->addr = bfd_asymbol_value(bfd_dynsym[i]);
+            }
+            ...
+}
+```
+
+在`main`函数中打印符号表的代码中加入判断数据符号的代码：
+
+```c
+    if (!bin.symbols.empty()) {
+        printf("\nsymbol table:\n");
+        printf("  %-40s %-18s %s\n", "Name", "Addr", "Type");
+        for (i = 0; i < bin.symbols.size(); i++) {
+            sym = &bin.symbols[i];
+            printf("  %-40s 0x%016jx %s\n",sym->name.c_str(), sym->addr,
+-                (sym->type & Symbol::SYM_TYPE_FUNC) ? "FUNC" : "");
++                (sym->type & Symbol::SYM_TYPE_FUNC) ? "FUNC" :
++                (sym->type & Symbol::SYM_TYPE_DATA) ? "DATA" : "");
+        }
+    }
+```
+
+
+
+### 主函数
+
+最终的`main`函数：
+
+```c
+int main(int argc, char* argv[])
+{
+    size_t i;
+    size_t size;
+    uint64_t vma;
+    Binary bin;
+    Section *sec;
+    Symbol *sym;
+    std::string fname;
+
+    if (argc < 2 || argc > 3) {
+        printf("Usage: %s <binary> [<section_name>]\n", argv[0]);
+        return 1;
+    }
+
+    fname.assign(argv[1]);
+
+    if (load_binary(fname, &bin, Binary::BIN_TYPE_AUTO) < 0) {
+        return 1;
+    };
+
+    printf("\nloaded binary '%s' %s/%s (%ubits) entry@0x%016jx\n",
+        bin.filename.c_str(), bin.type_str.c_str(), bin.arch_str.c_str(), bin.bits, bin.entry);
+
+    if (!bin.sections.empty()) {
+        printf("\nsections:\n");
+        printf("  %-18s %-8s %-20s %s\n", "VMA", "Size", "Name", "Type");
+        for (i = 0; i < bin.sections.size(); i++) {
+            sec = &bin.sections[i];
+            printf("  0x%016jx %-8ju %-20s %s\n",
+                sec->vma, sec->size, sec->name.c_str(),
+                sec->type == Section::SEC_TYPE_CODE ? "CODE" : "DATA");
+        }
+    }
+    
+    if (!bin.symbols.empty()) {
+        printf("\nsymbol table:\n");
+        printf("  %-40s %-18s %s\n", "Name", "Addr", "Type");
+        for (i = 0; i < bin.symbols.size(); i++) {
+            sym = &bin.symbols[i];
+            printf("  %-40s 0x%016jx %s\n",sym->name.c_str(), sym->addr,
+                (sym->type & Symbol::SYM_TYPE_FUNC) ? "FUNC" :
+                (sym->type & Symbol::SYM_TYPE_DATA) ? "DATA" : "");
+        }
+    }
+
+    if (argc == 3) {
+        for (i = 0; (i < bin.sections.size()) && (bin.sections[i].name != argv[2]); i++) {}
+        if (i == bin.sections.size()) {
+            printf("\nThere is not a section called '%s', please check it and try again!\n", argv[2]);
+            goto cleanup;
+        }
+        sec = &bin.sections[i];
+        printf("\n%s(%dbytes):\n", argv[2], sec->size);
+        for (size = 0, vma = sec->vma; size < sec->size; size += 16, vma += 16) {
+            printf("  0x%016jx: ", vma);
+            if (sec->size - size < 16) {
+                for (i = 0; i < sec->size - size; i++) {
+                    printf("%02x%s", sec->bytes[size + i], i % 2 ? " " : "");
+                }
+                for (; i < 16; i++) {
+                    printf("  %s", i % 2 ? " " : "");
+                }
+                for (i = 0; i < sec->size - size; i++) {
+                    if (sec->bytes[size + i] >= 0x21 && sec->bytes[size + i] <= 0x7e) {
+                        printf("%c", sec->bytes[size + i]);
+                    } else {
+                        printf(".");
+                    }
+                }
+            } else {
+                for (i = 0; i < 16; i++) {
+                    printf("%02x%s", sec->bytes[size + i], i % 2 ? " " : "");
+                }
+                for (i = 0; i < 16; i++) {
+                    if (sec->bytes[size + i] >= 0x21 && sec->bytes[size + i] <= 0x7e) {
+                        printf("%c", sec->bytes[size + i]);
+                    } else {
+                        printf(".");
+                    }
+                }
+            }
+            printf("\n");
+        }
+    }
+
+cleanup:
+    unload_binary(&bin);
+
+    return 0;
+}
+```
+
+
+
+### 测试ELF文件
+
+编译&链接。这里是用`MinGW-W64-builds-5.0.0`在`Windows11`的`PowerShell`上编译的。
+
+```bash
+$ g++ loader_demo.cpp inc/loader.cpp -lbfd -liberty -lz -o loader_demo.exe
+```
+
+解析ELF文件。
+
+```bash
+$ ./loader_demo.exe 4_1_elf_binary.out .rodata
+
+loaded binary '4_1_elf_binary.out' elf64-x86-64/i386:x86-64 (64bits) entry@0x0000000000001060
+
+sections:
+  VMA                Size     Name                 Type
+  0x00000000000002a8 28       .interp              DATA
+  0x00000000000002c4 36       .note.gnu.build-id   DATA
+  0x00000000000002e8 32       .note.ABI-tag        DATA
+  0x0000000000000308 36       .gnu.hash            DATA
+  0x0000000000000330 192      .dynsym              DATA
+  0x00000000000003f0 138      .dynstr              DATA
+  0x000000000000047a 16       .gnu.version         DATA
+  0x0000000000000490 32       .gnu.version_r       DATA
+  0x00000000000004b0 192      .rela.dyn            DATA
+  0x0000000000000570 48       .rela.plt            DATA
+  0x0000000000001000 23       .init                CODE
+  0x0000000000001020 48       .plt                 CODE
+  0x0000000000001050 8        .plt.got             CODE
+  0x0000000000001060 433      .text                CODE
+  0x0000000000001214 9        .fini                CODE
+  0x0000000000002000 40       .rodata              DATA
+  0x0000000000002028 60       .eh_frame_hdr        DATA
+  0x0000000000002068 264      .eh_frame            DATA
+  0x0000000000003de8 8        .init_array          DATA
+  0x0000000000003df0 8        .fini_array          DATA
+  0x0000000000003df8 480      .dynamic             DATA
+  0x0000000000003fd8 40       .got                 DATA
+  0x0000000000004000 40       .got.plt             DATA
+  0x0000000000004028 20       .data                DATA
+
+symbol table:
+  Name                                     Addr               Type
+  deregister_tm_clones                     0x0000000000001090 FUNC
+  register_tm_clones                       0x00000000000010c0 FUNC
+  __do_global_dtors_aux                    0x0000000000001100 FUNC
+  completed.0                              0x000000000000403c DATA
+  __do_global_dtors_aux_fini_array_entry   0x0000000000003df0 DATA
+  frame_dummy                              0x0000000000001140 FUNC
+  __frame_dummy_init_array_entry           0x0000000000003de8 DATA
+  __FRAME_END__                            0x000000000000216c DATA
+  _DYNAMIC                                 0x0000000000003df8 DATA
+  _GLOBAL_OFFSET_TABLE_                    0x0000000000004000 DATA
+  _init                                    0x0000000000001000 FUNC
+  __libc_csu_fini                          0x0000000000001210 FUNC
+  putchar@GLIBC_2.2.5                      0x0000000000000000 FUNC
+  puts@GLIBC_2.2.5                         0x0000000000000000 FUNC
+  _fini                                    0x0000000000001214 FUNC
+  global_var                               0x0000000000004038 DATA
+  __libc_start_main@GLIBC_2.2.5            0x0000000000000000 FUNC
+  __dso_handle                             0x0000000000004030 DATA
+  _IO_stdin_used                           0x0000000000002000 DATA
+  __libc_csu_init                          0x00000000000011b0 FUNC
+  _start                                   0x0000000000001060 FUNC
+  main                                     0x0000000000001145 FUNC
+  __TMC_END__                              0x0000000000004040 DATA
+  __cxa_finalize@GLIBC_2.2.5               0x0000000000000000 FUNC
+  putchar                                  0x0000000000000000 FUNC
+  puts                                     0x0000000000000000 FUNC
+  __libc_start_main                        0x0000000000000000 FUNC
+  __cxa_finalize                           0x0000000000000000 FUNC
+
+.rodata(40bytes):
+  0x0000000000002000: 0100 0200 0000 0000 7468 6572 6520 6172 ........there.ar
+  0x0000000000002010: 6520 736f 6d65 2074 6578 7420 666f 7220 e.some.text.for.
+  0x0000000000002020: 7465 7374 696e 6700                     testing.
+```
+
+
+
 ## 参考
 
 1. 《编译系统透视：图解编译原理》，第8章-预处理
@@ -977,4 +2005,6 @@ Idx Name          Size      VMA               LMA               File off  Algn
 1. [Tool Interface Standard (TIS) Executable and Linking Format (ELF)  Specification Version 1.2](https://refspecs.linuxfoundation.org/elf/elf.pdf)
 2. [ELF 应用程序二进制接口 - 链接程序和库指南](https://docs.oracle.com/cd/E26926_01/html/E25910/glcfv.html#scrolltoc)
 3. 《程序员的自我修养---链接、装载与库》
+3. [PE Format - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/debug/pe-format)
+3. [LIB BFD, the Binary File Descriptor Library (gnu.org)](https://ftp.gnu.org/old-gnu/Manuals/bfd-2.9.1/html_mono/bfd.html#SEC1)
 
