@@ -976,7 +976,7 @@ BFD是Binary format descriptor的缩写，即二进制文件格式描述符，�
 
 
 
-### 二进制加载接口
+### 4.1 二进制加载接口
 
 首先创建一个头文件，定义相关的类和函数。引入要使用的头文件，并且定义3个类名。定义一个Binary类，作为整个二进制文件的抽象，定义Section和Symbol类，作为节和符号的抽象。
 
@@ -992,7 +992,7 @@ class Binary;
 
 
 
-### Symbol
+### 4.2 Symbol
 
 Symbol类与二进制文件的符号相关，ELF文件中的符号表包括局部和全局变量、函数、重定位表达式及对象等，此处只解析函数符号。
 
@@ -1014,7 +1014,7 @@ class Symbol {
 
 
 
-### Section
+### 4.3 Section
 
 Section类围绕二进制文件的节进行实现。例如Linux上的ELF格式文件，由一系列二进制节组织而成。使用readelf都会显示相关的基本信息，包括节头表里的索引、节的名称和类型，除此以外，还可以查看节的虚拟地址、文件偏移及大小、节的标志等等信息。
 
@@ -1040,7 +1040,7 @@ class Section {
 
 
 
-### Binary
+### 4.4 Binary
 
 这个类作为整个二进制文件的抽象，其中包含了二进制文件的文件名、类型、平台架构、位宽、入口点地址、节及符号。
 
@@ -1074,7 +1074,7 @@ class Binary {
 
 
 
-### 加载二进制文件
+### 4.5 加载二进制文件
 
 定义加载器的两个入口函数`load_binary`和`unload_binary`函数。用于加载二进制文件，加载完毕后释放二进制文件的内存。`load_binary`解析由文件名指定的二进制文件，并将其加载到`Binary`对象中，其中调用了`load_binary_bfd`函数，将在后续实现。
 
@@ -1100,7 +1100,7 @@ void unload_binary(Binary *bin) {
 
 
 
-### 打开二进制文件
+### 4.6 打开二进制文件
 
 如下实现了一个`open_bfd`函数，使用`libbfd`通过文件名(`fname`参数)确定二进制文件的属性，并将其打开，然后返回该二进制文件的句柄。事先要使用`bfd_init`函数来初始化内部结构，`open_inited`标识是否已经初始化。通过调用`bfd_openr`函数以文件名打开二进制文件，该函数第二个参数指定了文件类型，传入`NULL`则表示让`libbfd`自动确定二进制文件类型。`bfd_openr`返回一个指向`bfd`类型的文件句柄指针，这是`libbfd`的根数据结构，如果打开发生错误，则为`NULL`。使用`bfd_get_error`函数得到最近的错误类型，返回`bfd_error_type`对象，与预定义的错误标识符进行比较。
 
@@ -1191,7 +1191,7 @@ enum bfd_flavour
 
 
 
-### 解析基本属性
+### 4.7 解析基本属性
 
 将二进制文件中的一些重要属性加载到Binary中。
 
@@ -1359,7 +1359,7 @@ typedef struct bfd_arch_info
 
 
 
-### 加载静态符号
+### 4.8 加载静态符号
 
 加载二进制文件的静态符号表。
 
@@ -1419,7 +1419,7 @@ cleanup:
 
 
 
-### 加载动态空间
+### 4.9 加载动态空间
 
 从动态符号表中加载符号。
 
@@ -1477,7 +1477,7 @@ cleanup:
 
 
 
-### 加载节信息
+### 4.10 加载节信息
 
 加载二进制文件的节。
 
@@ -1536,9 +1536,9 @@ libbfd使用一个名为asection的数据结构来保存节信息，也称为bfd
 
 
 
-###  练习
+###  4. 11 练习
 
-#### 十六进制形式输出指定段
+#### 4.11.1 十六进制形式输出指定段
 
 参照`xxd`、`objdump`的输出形式，按照`虚拟内存地址:十六进制 字符`的形式对段的内容进行输出。
 
@@ -1584,7 +1584,7 @@ for (size = 0, vma = sec->vma; size < sec->size; size += 16, vma += 16) {
 
 
 
-#### 检查弱符号
+#### 4.11.2 检查弱符号
 
 对于C/C++语言来说，编译器默认函数和初始化了的全局变量为**强符号**，未初始化的全局变量为**弱符号**。链接器会按照如下规则处理与选择被多次定义的全局符号：
 
@@ -1731,7 +1731,7 @@ if (sym->flags & BSF_WEAK) {
 
 
 
-#### 打印数据符号
+#### 4.11.3 打印数据符号
 
 要区分全局和局部数据，以及函数符号，只需要检查符号的标志位：
 
@@ -1817,7 +1817,7 @@ static int load_dynsym_bfd(bfd *bfd_h, Binary *bin) {
 
 
 
-### 主函数
+### 4.12 主函数
 
 最终的`main`函数：
 
@@ -1917,7 +1917,7 @@ cleanup:
 
 
 
-### 测试ELF文件
+### 4.13 测试ELF文件
 
 编译&链接。这里是用`MinGW-W64-builds-5.0.0`在`Windows11`的`PowerShell`上编译的。
 
@@ -1998,13 +1998,884 @@ symbol table:
 
 
 
+# 第二部分、二进制分析基础
+
+## 5. Linux二进制分析
+
+二进制文件分析有以下两类手段：
+
+- 静态分析：静态分析技术可以在不运行二进制文件的情况下对二进制文件进行分析。优点：可以一次性分析整个二进制文件，且不需要特定的CPU来运行二进制文件。缺点：静态分析不了解二进制文件运行时的状态，会使分析非常难。
+- 动态分析：与静态分析相反，动态分析会运行二进制文件并在执行时对其进行分析。比静态分析简单，能完全了解运行时的状态。但仅能看到执行的代码，可能会忽略其它有用的信息。
+
+
+
+### 5.1 使用file查看文件类型
+
+file命令的功能是用于识别文件的类型，也可以用来辨别一些内容的编码格式。由于Linux系统并不是像Windows系统那样通过扩展名来定义文件类型，因此用户无法直接通过文件名来进行分辨。file命令则是为了解决此问题，通过分析文件头部信息中的标识来显示文件类型。
+
+`file [参数] 文件`
+
+| 常用参数 | 含义               |
+| -------- | ------------------ |
+| -i       | 显示文件的MIME类别 |
+
+```bash
+$ file payload
+payload: ASCII text
+
+$ file -i payload
+payload: text/plain; charset=us-ascii
+```
+
+使用`head`以ASCII打印文件开头的字符串：
+
+```bash
+$ head payload
+H4sIABzY61gAA+xaD3RTVZq/Sf+lFJIof1r+2aenKKh0klJKi4MmJaUvWrTSFlgR0jRN20iadpKX
+UljXgROKjbUOKuOfWWfFnTlzZs/ZXTln9nTRcTHYERhnZ5c/R2RGV1lFTAFH/DNYoZD9vvvubd57
+bcBl1ln3bL6e9Hvf9+733e/+v+/en0dqId80WYAWLVqI3LpooUXJgUpKFy6yEOsCy6KSRQtLLQsW
+EExdWkIEyzceGVA4JLmDgkCaA92XTXel9/9H6ftVNcv0Ot2orCe3E5RiJhuVbUw/fH3SxkbKSS78
+v47MJtkgZynS2YhNxYeZa84NLF0G/DLhV66X5XK9TcVnsXSc6xQ8S1UCm4o/M5moOCHCqB3Geny2
+rD0+u1HFD7I4junVdnpmN8zshll6zglPr1eXL5P96pm+npWLcwdL51CkR6r9UGrGZ8O1zN+1NhUv
+ZelKNXb3gl02+fpkZnwFyy9VvQgsfs55O3zH72sqK/2Ov3m+3xcId8/vLi+bX1ZaHOooLqExmVna
+6rsbaHpejwKLeQqR+wC+n/ePA3n/duKu2kNvL175+MxD7z75W8GC76aSZLv1xgSdkGnLRV0+/KbD
+7+UPnnhwadWbZ459b/Wsl/o/NZ468olxo3P9wOXK3Qe/a8fRmwhvcTVdl0J/UDe+nzMp9M4U+n9J
+oX8jhT5HP77+ZIr0JWT8+NvI+OnvTpG+NoV/Qwr9Vyn0b6bQkxTl+ixF+p+m0N+qx743k+wWGlX6
+```
+
+可以猜测以上文件应该是一个Base64编码的文件。
+
+`base64`码表：
+
+| **索引** | **对应字符** | **索引** | **对应字符** | **索引** | **对应字符** | **索引** | **对应字符** |
+| -------- | ------------ | -------- | ------------ | -------- | ------------ | -------- | ------------ |
+| 0        | **A**        | 17       | **R**        | 34       | **i**        | 51       | **z**        |
+| 1        | **B**        | 18       | **S**        | 35       | **j**        | 52       | **0**        |
+| 2        | **C**        | 19       | **T**        | 36       | **k**        | 53       | **1**        |
+| 3        | **D**        | 20       | **U**        | 37       | **l**        | 54       | **2**        |
+| 4        | **E**        | 21       | **V**        | 38       | **m**        | 55       | **3**        |
+| 5        | **F**        | 22       | **W**        | 39       | **n**        | 56       | **4**        |
+| 6        | **G**        | 23       | **X**        | 40       | **o**        | 57       | **5**        |
+| 7        | **H**        | 24       | **Y**        | 41       | **p**        | 58       | **6**        |
+| 8        | **I**        | 25       | **Z**        | 42       | **q**        | 59       | **7**        |
+| 9        | **J**        | 26       | **a**        | 43       | **r**        | 60       | **8**        |
+| 10       | **K**        | 27       | **b**        | 44       | **s**        | 61       | **9**        |
+| 11       | **L**        | 28       | **c**        | 45       | **t**        | 62       | **+**        |
+| 12       | **M**        | 29       | **d**        | 46       | **u**        | 63       | **/**        |
+| 13       | **N**        | 30       | **e**        | 47       | **v**        |          |              |
+| 14       | **O**        | 31       | **f**        | 48       | **w**        |          |              |
+| 15       | **P**        | 32       | **g**        | 49       | **x**        |          |              |
+| 16       | **Q**        | 33       | **h**        | 50       | **y**        |          |              |
+
+
+
+使用`base64`对文件解码：
+
+```bash
+$ base64 -d payload > decoded_payload
+```
+
+查看`decoded_payload`文件类型：
+
+```bash
+$ file decoded_payload
+decoded_payload: gzip compressed data, last modified: Mon Apr 10 19:08:12 2017, from Unix, original size modulo 2^32 808960
+```
+
+可以看到文件使用了`gzip`进行压缩，继续使用`file -z`查看压缩文件的内容：
+
+```bash
+$ file -z decoded_payload
+decoded_payload: POSIX tar archive (GNU) (gzip compressed data, last modified: Mon Apr 10 19:08:12 2017, from Unix)
+```
+
+压缩文件中还有一个用`tar`压缩的文件，使用`tar`解压缩提取`decoded_payload`的内容：
+
+```bash
+$ tar xvzf decoded_payload
+ctf
+67b8601
+```
+
+`tar`提取出了`ctf`和`67b8601`两个文件，使用`file`查看这两个文件的类型：
+
+```bash
+$ file ctf
+ctf: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 2.6.32, BuildID[sha1]=29aeb60bcee44b50d1db3a56911bd1de93cd2030, stripped
+
+$ file 67b8601
+67b8601: PC bitmap, Windows 3.x format, 512 x 512 x 24, image size 786434, resolution 7872 x 7872 px/m, 1165950976 important colors, cbSize 786488, bits offset 54
+```
+
+
+
+### 5.2 使用ldd查看文件依赖
+
+运行`ctf`文件。
+
+```bash
+$ ./ctf
+./ctf: error while loading shared libraries: lib5ae9b7f.so: cannot open shared object file: No such file or directory
+```
+
+`ctf`缺少动态库`lib5ae9b7f.so`，现在需要使用`ldd`工具检查一下是否有更多的未解析的依赖项。
+
+```bash
+$ ldd ctf
+        linux-vdso.so.1 (0x00007ffff70d4000)
+        lib5ae9b7f.so => not found
+        libstdc++.so.6 => /usr/lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f44eb790000)
+        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f44eb770000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f44eb5a0000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f44eb450000)
+        /lib64/ld-linux-x86-64.so.2 (0x00007f44eb967000)
+```
+
+只有`lib5ae9b7f.so`没有被解析，使用`grep`搜索ELF文件格式的幻数`"ELF"`。
+
+```bash
+$ grep 'ELF' *
+grep: 67b8601: binary file matches
+grep: ctf: binary file matches
+```
+
+可以看到`67b8601`中含有ELF文件的幻数。所以猜测该文件中包含ELF文件。
+
+
+
+### 5.3 使用xxd查看文件内容
+
+使用`xxd`以十六进制形式打印`67b8601`文件。
+
+```bash
+$ xxd 67b8601 | head -n 15
+00000000: 424d 3800 0c00 0000 0000 3600 0000 2800  BM8.......6...(.
+00000010: 0000 0002 0000 0002 0000 0100 1800 0000  ................
+00000020: 0000 0200 0c00 c01e 0000 c01e 0000 0000  ................
+00000030: 0000 0000 7f45 4c46 0201 0100 0000 0000  .....ELF........
+00000040: 0000 0000 0300 3e00 0100 0000 7009 0000  ......>.....p...
+00000050: 0000 0000 4000 0000 0000 0000 7821 0000  ....@.......x!..
+00000060: 0000 0000 0000 0000 4000 3800 0700 4000  ........@.8...@.
+00000070: 1b00 1a00 0100 0000 0500 0000 0000 0000  ................
+00000080: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+00000090: 0000 0000 f40e 0000 0000 0000 f40e 0000  ................
+000000a0: 0000 0000 0000 2000 0000 0000 0100 0000  ...... .........
+000000b0: 0600 0000 f01d 0000 0000 0000 f01d 2000  .............. .
+000000c0: 0000 0000 f01d 2000 0000 0000 6802 0000  ...... .....h...
+000000d0: 0000 0000 7002 0000 0000 0000 0000 2000  ....p......... .
+000000e0: 0000 0000 0200 0000 0600 0000 081e 0000  ................
+```
+
+可以看到幻数ELF出现在0x00000034位置处，即偏移量为52字节。ELF文件头的大小为64字节，所以使用`dd`将ELF文件头提取出来。
+
+```bash
+$ dd skip=52 count=64 if=67b8601 of=elf_header bs=1
+64+0 records in
+64+0 records out
+64 bytes copied, 0.0056582 s, 11.3 kB/s
+```
+
+使用`xxd`查看`elf_header`内容。
+
+```bash
+$ xxd elf_header
+00000000: 7f45 4c46 0201 0100 0000 0000 0000 0000  .ELF............
+00000010: 0300 3e00 0100 0000 7009 0000 0000 0000  ..>.....p.......
+00000020: 4000 0000 0000 0000 7821 0000 0000 0000  @.......x!......
+00000030: 0000 0000 4000 3800 0700 4000 1b00 1a00  ....@.8...@.....
+```
+
+
+
+### 5.4 使用readelf解析ELF文件
+
+使用`readelf`读取ELF文件头，查看文件信息。
+
+```bash
+$ readelf -h elf_header
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              DYN (Shared object file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x970
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          8568 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         7
+  Size of section headers:           64 (bytes)
+  Number of section headers:         27
+  Section header string table index: 26
+readelf: Error: Reading 1728 bytes extends past end of file for section headers
+readelf: Error: Too many program headers - 0x7 - the file is not that big
+```
+
+可以得到ELF文件的节头偏移量为8568字节，节头表每项的大小为64字节，节头表中表项的数量为27。因为ELF文件的结尾是节头表，所以文件的总大小就为`节头表偏移量+节头表每项的大小*节头表表项的数量`，即8565+64*27=10296。所以该库的大小为10296字节，最终我们将它提取出来。
+
+```bash
+$ dd skip=52 count=10296 if=67b8601 of=lib5ae9b7f.so bs=1
+10296+0 records in
+10296+0 records out
+10296 bytes (10 kB, 10 KiB) copied, 0.244036 s, 42.2 kB/s
+```
+
+使用`readelf -hs`查看文件的文件头和符号表
+
+```bash
+$ readelf -hs lib5ae9b7f.so
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              DYN (Shared object file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x970
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          8568 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         7
+  Size of section headers:           64 (bytes)
+  Number of section headers:         27
+  Section header string table index: 26
+
+Symbol table '.dynsym' contains 22 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
+     1: 00000000000008c0     0 SECTION LOCAL  DEFAULT    9
+     2: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND __gmon_start__
+     3: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND _Jv_RegisterClasses
+     4: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND [...]@GLIBCXX_3.4.21 (2)
+     5: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND [...]@GLIBC_2.2.5 (3)
+     6: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND _ITM_deregisterT[...]
+     7: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND _ITM_registerTMC[...]
+     8: 0000000000000000     0 FUNC    WEAK   DEFAULT  UND [...]@GLIBC_2.2.5 (3)
+     9: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND __[...]@GLIBC_2.4 (4)
+    10: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND [...]@GLIBCXX_3.4 (5)
+    11: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND memcpy@GLIBC_2.14 (6)
+    12: 0000000000000bc0   149 FUNC    GLOBAL DEFAULT   12 _Z11rc4_encryptP[...]
+    13: 0000000000000cb0   112 FUNC    GLOBAL DEFAULT   12 _Z8rc4_initP11rc[...]
+    14: 0000000000202060     0 NOTYPE  GLOBAL DEFAULT   24 _end
+    15: 0000000000202058     0 NOTYPE  GLOBAL DEFAULT   23 _edata
+    16: 0000000000000b40   119 FUNC    GLOBAL DEFAULT   12 _Z11rc4_encryptP[...]
+    17: 0000000000000c60     5 FUNC    GLOBAL DEFAULT   12 _Z11rc4_decryptP[...]
+    18: 0000000000202058     0 NOTYPE  GLOBAL DEFAULT   24 __bss_start
+    19: 00000000000008c0     0 FUNC    GLOBAL DEFAULT    9 _init
+    20: 0000000000000c70    59 FUNC    GLOBAL DEFAULT   12 _Z11rc4_decryptP[...]
+    21: 0000000000000d20     0 FUNC    GLOBAL DEFAULT   13 _fini
+```
+
+
+
+### 5.5 使用nm解析符号表
+
+C++为了支持函数重载，使用了符号修饰，其实质上是原始函数名称和函数参数编码的组合，这样，函数的每个版本都会获得唯一的名称，并且链接器也不会对重载的函数产生歧义。
+
+符号修饰对于逆向工程的作用：
+
+- 符号修饰难以阅读
+- 符号修饰实质上泄露了函数的参数
+
+使用`nm`查看静态链接表。
+
+```bash
+$ nm lib5ae9b7f.so
+nm: lib5ae9b7f.so: no symbols
+```
+
+动态库中不存在静态符号，所以用`nm -D`查看动态链接表。
+
+```bash
+$ nm -D lib5ae9b7f.so
+0000000000202058 B __bss_start
+                 w __cxa_finalize@GLIBC_2.2.5
+0000000000202058 D _edata
+0000000000202060 B _end
+0000000000000d20 T _fini
+                 w __gmon_start__
+00000000000008c0 T _init
+                 w _ITM_deregisterTMCloneTable
+                 w _ITM_registerTMCloneTable
+                 w _Jv_RegisterClasses
+                 U malloc@GLIBC_2.2.5
+                 U memcpy@GLIBC_2.14
+                 U __stack_chk_fail@GLIBC_2.4
+0000000000000c60 T _Z11rc4_decryptP11rc4_state_tPhi
+0000000000000c70 T _Z11rc4_decryptP11rc4_state_tRNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+0000000000000b40 T _Z11rc4_encryptP11rc4_state_tPhi
+0000000000000bc0 T _Z11rc4_encryptP11rc4_state_tRNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+0000000000000cb0 T _Z8rc4_initP11rc4_state_tPhi
+                 U _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm@GLIBCXX_3.4.21
+                 U _ZSt19__throw_logic_errorPKc@GLIBCXX_3.4
+```
+
+继续使用`--demangle`解析符号修饰过的函数
+
+```bash
+$ nm -D --demangle lib5ae9b7f.so
+0000000000202058 B __bss_start
+                 w __cxa_finalize@GLIBC_2.2.5
+0000000000202058 D _edata
+0000000000202060 B _end
+0000000000000d20 T _fini
+                 w __gmon_start__
+00000000000008c0 T _init
+                 w _ITM_deregisterTMCloneTable
+                 w _ITM_registerTMCloneTable
+                 w _Jv_RegisterClasses
+                 U malloc@GLIBC_2.2.5
+                 U memcpy@GLIBC_2.14
+                 U __stack_chk_fail@GLIBC_2.4
+0000000000000c60 T rc4_decrypt(rc4_state_t*, unsigned char*, int)
+0000000000000c70 T rc4_decrypt(rc4_state_t*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&)
+0000000000000b40 T rc4_encrypt(rc4_state_t*, unsigned char*, int)
+0000000000000bc0 T rc4_encrypt(rc4_state_t*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&)
+0000000000000cb0 T rc4_init(rc4_state_t*, unsigned char*, int)
+                 U std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_create(unsigned long&, unsigned long)@GLIBCXX_3.4.21
+                 U std::__throw_logic_error(char const*)@GLIBCXX_3.4
+```
+
+还有一个叫做`c++filt`的工具支持多种修饰格式，可以自动检测并修正输入的修饰格式。
+
+```bash
+$ c++filt _Z8rc4_initP11rc4_state_tPhi
+rc4_init(rc4_state_t*, unsigned char*, int)
+```
+
+设置下`GCC`的动态链接库时的环境变量并运行`ctf`。
+
+```bash
+$ export LD_LIBRARY_PATH=`pwd`
+$ ./ctf
+$ echo $?
+1
+```
+
+链接成功，程序运行了，程序退出码为1，表示有错误。
+
+
+
+### 5.6 使用strings查看字符串
+
+为了弄清楚二进制文件的功能，以及程序期望的输入类型，可以检查二进制文件是否包含有用的字符串。使用`strings`工具查看文件中的字符串。
+
+```bash
+$ strings ctf
+/lib64/ld-linux-x86-64.so.2
+lib5ae9b7f.so
+__gmon_start__
+_Jv_RegisterClasses
+_ITM_deregisterTMCloneTable
+_ITM_registerTMCloneTable
+_Z8rc4_initP11rc4_state_tPhi
+...
+DEBUG: argv[1] = %s
+checking '%s'
+show_me_the_flag
+>CMb
+-v@P^:
+flag = %s
+guess again!
+It's kinda like Louisiana. Or Dagobah. Dagobah - Where Yoda lives!
+;*3$"
+zPLR
+GCC: (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+.shstrtab
+.interp
+.note.ABI-tag
+.note.gnu.build-id
+.gnu.hash
+.dynsym
+.dynstr
+.gnu.version
+.gnu.version_r
+.rela.dyn
+.rela.plt
+.init
+.plt.got
+.text
+.fini
+.rodata
+.eh_frame_hdr
+.eh_frame
+.gcc_except_table
+.init_array
+.fini_array
+.jcr
+.dynamic
+.got.plt
+.data
+.bss
+.comment
+```
+
+可以看出来几个有用的字符串：
+
+```
+DEBUG: argv[1] = %s
+checking '%s'
+show_me_the_flag
+flag = %s
+guess again!
+It's kinda like Louisiana. Or Dagobah. Dagobah - Where Yoda lives!
+```
+
+可以看到这个程序可以接受一个参数，尝试下给定一个参数。
+
+```bash
+$ ./ctf show_me_the_flag
+checking 'show_me_the_flag'
+ok
+$ echo $?
+1
+```
+
+参数正确，但是退出码为1，还是有问题。继续查找问题。
+
+
+
+### 5.7 使用strace和ltrace跟踪系统调用和库调用
+
+`strace`跟踪程序的系统调用，`ltrace`跟踪程序的库调用。
+
+```bash
+$ strace ./ctf show_me_the_flag
+execve("./ctf", ["./ctf", "show_me_the_flag"], 0x7fffdd7159b8 /* 17 vars */) = 0
+brk(NULL)                               = 0x1bc4000
+access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls/haswell/x86_64/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+stat("/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls/haswell/x86_64", 0x7fffe0c765a0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls/haswell/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+stat("/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls/haswell", 0x7fffe0c765a0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls/x86_64/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+stat("/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls/x86_64", 0x7fffe0c765a0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+stat("/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/tls", 0x7fffe0c765a0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/haswell/x86_64/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+stat("/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/haswell/x86_64", 0x7fffe0c765a0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/haswell/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+stat("/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/haswell", 0x7fffe0c765a0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/x86_64/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+stat("/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/x86_64", 0x7fffe0c765a0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/lib5ae9b7f.so", O_RDONLY|O_CLOEXEC) = 3
+read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0p\t\0\0\0\0\0\0"..., 832) = 832
+fstat(3, {st_mode=S_IFREG|0777, st_size=10296, ...}) = 0
+mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7facbef40000
+mmap(NULL, 2105440, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7facbed00000
+mprotect(0x7facbed01000, 2097152, PROT_NONE) = 0
+mmap(0x7facbef01000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x1000) = 0x7facbef01000
+close(3)                                = 0
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/libstdc++.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+fstat(3, {st_mode=S_IFREG|0644, st_size=14796, ...}) = 0
+mmap(NULL, 14796, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7facbef0c000
+close(3)                                = 0
+openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/libstdc++.so.6", O_RDONLY|O_CLOEXEC) = 3
+read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\240\240\t\0\0\0\0\0"..., 832) = 832
+fstat(3, {st_mode=S_IFREG|0644, st_size=1870824, ...}) = 0
+mmap(NULL, 1886208, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7facbeb30000
+mmap(0x7facbebc6000, 901120, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x96000) = 0x7facbebc6000
+mmap(0x7facbeca2000, 303104, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x172000) = 0x7facbeca2000
+mmap(0x7facbecec000, 57344, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x1bb000) = 0x7facbecec000
+mmap(0x7facbecfa000, 10240, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0x7facbecfa000
+close(3)                                = 0
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0203\0\0\0\0\0\0"..., 832) = 832
+fstat(3, {st_mode=S_IFREG|0644, st_size=100736, ...}) = 0
+mmap(NULL, 103496, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7facbeb10000
+mmap(0x7facbeb13000, 69632, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x3000) = 0x7facbeb13000
+mmap(0x7facbeb24000, 16384, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x14000) = 0x7facbeb24000
+mmap(0x7facbeb28000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x17000) = 0x7facbeb28000
+close(3)                                = 0
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/libc.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0@n\2\0\0\0\0\0"..., 832) = 832
+fstat(3, {st_mode=S_IFREG|0755, st_size=1839792, ...}) = 0
+mmap(NULL, 1852680, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7facbe940000
+mprotect(0x7facbe965000, 1662976, PROT_NONE) = 0
+mmap(0x7facbe965000, 1355776, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x25000) = 0x7facbe965000
+mmap(0x7facbeab0000, 303104, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x170000) = 0x7facbeab0000
+mmap(0x7facbeafb000, 24576, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x1ba000) = 0x7facbeafb000
+mmap(0x7facbeb01000, 13576, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0x7facbeb01000
+close(3)                                = 0
+openat(AT_FDCWD, "/mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/libm.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\362\0\0\0\0\0\0"..., 832) = 832
+fstat(3, {st_mode=S_IFREG|0644, st_size=1321344, ...}) = 0
+mmap(NULL, 1323280, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x7facbe7f0000
+mmap(0x7facbe7ff000, 630784, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0xf000) = 0x7facbe7ff000
+mmap(0x7facbe899000, 626688, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0xa9000) = 0x7facbe899000
+mmap(0x7facbe932000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x141000) = 0x7facbe932000
+close(3)                                = 0
+mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7facbe7e0000
+mmap(NULL, 12288, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7facbe7d0000
+arch_prctl(ARCH_SET_FS, 0x7facbe7d0740) = 0
+mprotect(0x7facbeafb000, 12288, PROT_READ) = 0
+mprotect(0x7facbe932000, 4096, PROT_READ) = 0
+mprotect(0x7facbeb28000, 4096, PROT_READ) = 0
+mprotect(0x7facbecec000, 45056, PROT_READ) = 0
+mprotect(0x7facbef01000, 4096, PROT_READ) = 0
+mprotect(0x601000, 4096, PROT_READ)     = 0
+mprotect(0x7facbef3a000, 4096, PROT_READ) = 0
+munmap(0x7facbef0c000, 14796)           = 0
+brk(NULL)                               = 0x1bc4000
+brk(0x1be5000)                          = 0x1be5000
+fstat(1, {st_mode=S_IFCHR|0660, st_rdev=makedev(0x4, 0x1), ...}) = 0
+ioctl(1, TCGETS, {B38400 opost isig icanon echo ...}) = 0
+write(1, "checking 'show_me_the_flag'\n", 28checking 'show_me_the_flag'
+) = 28
+write(1, "ok\n", 3ok
+)                     = 3
+exit_group(1)                           = ?
++++ exited with 1 +++
+```
+
+`strace`输出的系统调用对找到flag没有帮助，但是对二进制分析有用，对调试也有帮助。接着使用`ltrace`查看库调用信息。
+
+```bash
+$ ltrace -i -C ./ctf show_me_the_flag
+[0x400fe9] __libc_start_main(0x400bc0, 2, 0x7fffea4d8648, 0x4010c0 <unfinished ...>
+[0x400c44] __printf_chk(1, 0x401158, 0x7fffea4d885d, 224checking 'show_me_the_flag'
+) = 28
+[0x400c51] strcmp("show_me_the_flag", "show_me_the_flag") = 0
+[0x400cf0] puts("ok"ok
+)                                    = 3
+[0x400d07] rc4_init(rc4_state_t*, unsigned char*, int)(0x7fffea4d8400, 0x4011c0, 66, -3442) = 0
+[0x400d14] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::assign(char const*)(0x7fffea4d8340, 0x40117b, 58, 3) = 0x7fffea4d8340
+[0x400d29] rc4_decrypt(rc4_state_t*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&)(0x7fffea4d83a0, 0x7fffea4d8400, 0x7fffea4d8340, 0x7e889f91) = 0x7fffea4d83a0
+[0x400d36] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)(0x7fffea4d8340, 0x7fffea4d83a0, 0x7fffea4d83b0, 0) = 0x7fffea4d8350
+[0x400d53] getenv("GUESSME")                             = nil
+[0xffffffffffffffff] +++ exited (status 1) +++
+```
+
+调用了`getenv`，这个函数是查看环境变量的，`getenv("GUESSME")`是获取`GUESSME`这个环境变量的意思。所以，可以猜测还是需要设置这个环境变量才能得到flag。
+
+```bash
+$ export GUESSME='foobar'
+$ ltrace -i -C ./ctf show_me_the_flag
+[0x400fe9] __libc_start_main(0x400bc0, 2, 0x7ffff373ce28, 0x4010c0 <unfinished ...>
+[0x400c44] __printf_chk(1, 0x401158, 0x7ffff373d045, 224checking 'show_me_the_flag'
+) = 28
+[0x400c51] strcmp("show_me_the_flag", "show_me_the_flag") = 0
+[0x400cf0] puts("ok"ok
+)                                    = 3
+[0x400d07] rc4_init(rc4_state_t*, unsigned char*, int)(0x7ffff373cbe0, 0x4011c0, 66, -3442) = 0
+[0x400d14] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::assign(char const*)(0x7ffff373cb20, 0x40117b, 58, 3) = 0x7ffff373cb20
+[0x400d29] rc4_decrypt(rc4_state_t*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&)(0x7ffff373cb80, 0x7ffff373cbe0, 0x7ffff373cb20, 0x7e889f91) = 0x7ffff373cb80
+[0x400d36] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)(0x7ffff373cb20, 0x7ffff373cb80, 0x7ffff373cb90, 0) = 0x7ffff373cb30
+[0x400d53] getenv("GUESSME")                             = "foobar"
+[0x400d6e] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::assign(char const*)(0x7ffff373cb40, 0x401183, 5, 0xffffffe0) = 0x7ffff373cb40
+[0x400d88] rc4_decrypt(rc4_state_t*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&)(0x7ffff373cba0, 0x7ffff373cbe0, 0x7ffff373cb40, 0x1724f00) = 0x7ffff373cba0
+[0x400d9a] std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)(0x7ffff373cb40, 0x7ffff373cba0, 0x1724f30, 0) = 0x1724ee0
+[0x400db4] operator delete(void*)(0x1724f30, 0x1724f30, 21, 0) = 0
+[0x400dd7] puts("guess again!"guess again!
+)                          = 13
+[0x400c8d] operator delete(void*)(0x1724ee0, 0x1723eb0, 0, 0x7fc0b448d1c0) = 0
+[0xffffffffffffffff] +++ exited (status 1) +++
+```
+
+
+
+### 5.8 使用objdump反汇编
+
+使用`objdump`围绕`guess again`调查，有助于了解字符串的地址以找出加载该字符串的第一条指令。
+
+```bash
+$ objdump -s --section .rodata ctf
+
+ctf:     file format elf64-x86-64
+
+Contents of section .rodata:
+ 401140 01000200 44454255 473a2061 7267765b  ....DEBUG: argv[
+ 401150 315d203d 20257300 63686563 6b696e67  1] = %s.checking
+ 401160 20272573 270a0073 686f775f 6d655f74   '%s'..show_me_t
+ 401170 68655f66 6c616700 6f6b004f 89df919f  he_flag.ok.O....
+ 401180 887e009a 5b38babe 27ac0e3e 434d6285  .~..[8..'..>CMb.
+ 401190 55868954 3848a34d 00192d76 40505e3a  U..T8H.M..-v@P^:
+ 4011a0 00726200 666c6167 203d2025 730a0067  .rb.flag = %s..g
+ 4011b0 75657373 20616761 696e2100 00000000  uess again!.....
+ 4011c0 49742773 206b696e 6461206c 696b6520  It's kinda like
+ 4011d0 4c6f7569 7369616e 612e204f 72204461  Louisiana. Or Da
+ 4011e0 676f6261 682e2044 61676f62 6168202d  gobah. Dagobah -
+ 4011f0 20576865 72652059 6f646120 6c697665   Where Yoda live
+ 401200 73210000 00000000                    s!......
+```
+
+`guess again`的地址为0x4011af。反汇编`ctf`找用到0x40011af的指令。
+
+```bash
+$ objdump -d  ctf | grep 0x4011af
+  400dcd:       bf af 11 40 00          mov    $0x4011af,%edi
+```
+
+查看0x400dcd附近的指令：
+
+```bash
+$ objdump -d ctf
+...
+  400dc0:       0f b6 14 03             movzbl (%rbx,%rax,1),%edx
+  400dc4:       84 d2                   test   %dl,%dl
+  400dc6:       74 05                   je     400dcd <__gmon_start__@plt+0x21d>
+  400dc8:       3a 14 01                cmp    (%rcx,%rax,1),%dl
+  400dcb:       74 13                   je     400de0 <__gmon_start__@plt+0x230>
+  400dcd:       bf af 11 40 00          mov    $0x4011af,%edi
+  400dd2:       e8 d9 fc ff ff          callq  400ab0 <puts@plt>
+  400dd7:       e9 84 fe ff ff          jmpq   400c60 <__gmon_start__@plt+0xb0>
+  400ddc:       0f 1f 40 00             nopl   0x0(%rax)
+  400de0:       48 83 c0 01             add    $0x1,%rax
+  400de4:       48 83 f8 15             cmp    $0x15,%rax
+  400de8:       75 d6                   jne    400dc0 <__gmon_start__@plt+0x210>
+...
+```
+
+`ctf`程序会将从GUESSME环境变量中得到的字符串与rcx的字符串进行比较。如果可以转储rcx字符串，那就可以找到GUESSME的值。而静态分析做不到，所以需要动态分析。
+
+
+
+### 5.9 使用gdb查看动态字符串缓冲区
+
+gdb主要用于调试，也可用于动态分析。在0x400dc8处设置断点，并查看rcx字符串。
+
+```bash
+$ gdb ./ctf
+GNU gdb (Debian 10.1-1.7) 10.1.90.20210103-git
+Copyright (C) 2021 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from ./ctf...
+(No debugging symbols found in ./ctf)
+(gdb) b *0x400dc8
+Breakpoint 1 at 0x400dc8
+(gdb) set env GUESSME=foobar
+(gdb) run show_me_the_flag
+Starting program: /mnt/d/Cyberspace Security/Practical Binary Analysis code/chapter5/ctf show_me_the_flag
+checking 'show_me_the_flag'
+ok
+
+Breakpoint 1, 0x0000000000400dc8 in ?? ()
+(gdb) display/i $pc
+1: x/i $pc
+=> 0x400dc8:    cmp    (%rcx,%rax,1),%dl
+(gdb) info registers rcx
+rcx            0x615ee0            6381280
+(gdb) info registers rax
+rax            0x0                 0
+(gdb) x/s 0x615ee0
+0x615ee0:       "Crackers Don't Matter"
+(gdb) quit
+```
+
+可以看到rcx字符串是`Crackers Don't Matter`，到此，已经得到了环境变量`GUESSME`的值。最后，输入正确的环境变量值，得到flag。
+
+```bash
+$ export GUESSME="Crackers Don't Matter"
+$ ./ctf show_me_the_flag
+checking 'show_me_the_flag'
+ok
+flag = 84b34c124b2ba5ca224af8e33b077e9e
+```
+
+
+
+### 5.10 练习
+
+将flag传给oracle程序。
+
+```bash
+$ ./oracle 84b34c124b2ba5ca224af8e33b077e9e
+./oracle: error while loading shared libraries: libcrypto.so.1.0.0: cannot open shared object file: No such file or directory
+```
+
+链接器显示缺少`libcrypto.so.1.0.0`。使用`find`并未在我的Linux系统找到该库，所以直接下载`libcrypto.so.1.0.0`。
+
+**libcrypto** a full-strength general purpose cryptographic library. It constitutes the basis of the TLS implementation, but can also be used independently.
+
+下载完`libcrypto.so.1.0.0`后，继续运行程序。
+
+```bash
+$ ./oracle 84b34c124b2ba5ca224af8e33b077e9e
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+| Level 1 completed, unlocked lvl2         |
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+Run oracle with -h to show a hint
+```
+
+完成了第一关。
+
+
+
+#### level 2
+
+现在解锁了第二关。
+
+```bash
+$ ./oracle 84b34c124b2ba5ca224af8e33b077e9e -h
+Combine the parts
+```
+
+提示`Combine the parts`，即"把各部分连接起来"。
+
+查看`lvl2`文件类型，为`ELF`类型。
+
+```bash
+$ file lvl2
+lvl2: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 2.6.32, BuildID[sha1]=457d7940f6a73d6505db1f022071ee7368b67ce9, stripped
+```
+
+查看`lvl2`的`.rodata`段，查看是否包含有用的信息。
+
+```bash
+$ objdump -s --section .rodata lvl2
+
+lvl2:     file format elf64-x86-64
+
+Contents of section .rodata:
+ 4006c0 01000200 30330034 66006334 00663600  ....03.4f.c4.f6.
+ 4006d0 61350033 36006632 00626600 37340066  a5.36.f2.bf.74.f
+ 4006e0 38006436 00643300 38310036 63006466  8.d6.d3.81.6c.df
+ 4006f0 00383800                             .88.
+```
+
+可以看到`.rodata`段里有16个16进制数，连接起来一共32位，联想到过第一关的flag也是由16个16进制数连接起来的32位数，我大胆猜测`lvl2`的`.rodata`段里所有的数拼接起来即为第二关的flag。
+
+```bash
+$ ./oracle 034fc4f6a536f2bf74f8d6d3816cdf88
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+| Level 2 completed, unlocked lvl3         |
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+Run oracle with -h to show a hint
+```
+
+完成了第二关。
+
+
+
+#### level 3
+
+现在解锁第三关。
+
+```bash
+$ ./oracle 034fc4f6a536f2bf74f8d6d3816cdf88 -h
+Fix four broken things
+```
+
+提示`Fix four broken things`，即"修复四个破碎的东西"。
+
+```bash
+$ readelf -h lvl3
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 0b 00 00 00 00 00 00 00 00
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            Novell - Modesto
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Motorola Coldfire
+  Version:                           0x1
+  Entry point address:               0x4005d0
+  Start of program headers:          4022250974 (bytes into file)
+  Start of section headers:          4480 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         9
+  Size of section headers:           64 (bytes)
+  Number of section headers:         29
+  Section header string table index: 28
+```
+
+大胆猜测，该文件应该能够在`x86-64`的`Linux`的操作系统上运行，所以
+
+- 首先`OS/ABI`不正确，应为`UNIX - System V`。`Magic`中的第8字节表示`OS/ABI`，故将第8字节修改为`0x00`表示`UNIX - System V`。
+- 其次`Machine`不正确，应为`Machine: Advanced Micro Devices X86-64`。故将第18、19字节修改为`0x3e00`表示`Machine: Advanced Micro Devices X86-64`。
+- 然后由ELF文件结构可知，程序头紧跟在ELF头后面，而ELF头为64字节大小，所以程序头的偏移量应该为64，所以`Start of program headers: 4022250974 (bytes into file)`不正确，应该为`Start of program headers: 64(bytes into file)`。故将第32至第37字节修改为`0x4000 0000 0000 0000`。
+
+![image-20220804032628830](assets/Practical-Binary-Analysis/image-20220804032628830.png)
+
+使用如下命令修改二进制文件：
+
+1. `vi-b xx.bin` ，`xx.bin` 为你要修改的文档，`-b` 以二进制方式打开修改。
+2. 命令模式下 ：`%！xxd` ，切换到16进制查看，便于修改
+3. 进行修改操作
+4. 命令模式下 ：`%！xxd -r` ,切换到二进制模式下
+5. `wq` ，保存并退出
+
+使用`readelf -S`查看各个段的情况。
+
+```bash
+$ readelf -S lvl3
+...
+[14] .text             NOBITS           0000000000400550  00000550
+       00000000000001f2  0000000000000000  AX       0     0     16
+...
+```
+
+`.text`的段类型应该`PROGBITS`类型，所以这里的`NOBITS`不正确。先计算出`.text`段在节表中的位置，即`section headers address + index * section entry size`。从`readelf -h lvl3`中可以看出`section headers address = 4480`，`section entry size = 64`。从`readelf -S lvl3`中可以看出`index = 14`。再根据`Elf_Shdr`的结构可知，`sh_type`在`Elf_Shdr`中的偏移量为`4`，所以`.text`段的`sh_type`字段在文件`lvl3`中的位置为`4480 + 64 * 14 + 4 = 5380`。故在`5380 = 0x1504`处将`NOBITS`改成`PROGBITS`类型的二进制表示形式`0x0100 0000`。
+
+```c
+typedef struct
+{
+  Elf64_Word    sh_name;                /* Section name (string tbl index) */
+  Elf64_Word    sh_type;                /* Section type */
+  Elf64_Xword   sh_flags;               /* Section flags */
+  Elf64_Addr    sh_addr;                /* Section virtual addr at execution */
+  Elf64_Off     sh_offset;              /* Section file offset */
+  Elf64_Xword   sh_size;                /* Section size in bytes */
+  Elf64_Word    sh_link;                /* Link to another section */
+  Elf64_Word    sh_info;                /* Additional section information */
+  Elf64_Xword   sh_addralign;           /* Section alignment */
+  Elf64_Xword   sh_entsize;             /* Entry size if section holds table */
+} Elf64_Shdr;
+```
+
+将`0x1504-0x1507`处改为`0x0100 0000`。
+
+![image-20220804043458926](assets/Practical-Binary-Analysis/image-20220804043458926.png)
+
+```bash
+$ ./oracle 3a5c381e40d2fffd95ba4452a0fb4a40
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+| Level 3 completed, unlocked lvl4         |
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+Run oracle with -h to show a hint
+```
+
+完成了第三关。
+
+
+
 ## 参考
 
 1. 《编译系统透视：图解编译原理》，第8章-预处理
 2. [Debugging with Symbols - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/dxtecharts/debugging-with-symbols)
-1. [Tool Interface Standard (TIS) Executable and Linking Format (ELF)  Specification Version 1.2](https://refspecs.linuxfoundation.org/elf/elf.pdf)
-2. [ELF 应用程序二进制接口 - 链接程序和库指南](https://docs.oracle.com/cd/E26926_01/html/E25910/glcfv.html#scrolltoc)
-3. 《程序员的自我修养---链接、装载与库》
-3. [PE Format - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/debug/pe-format)
-3. [LIB BFD, the Binary File Descriptor Library (gnu.org)](https://ftp.gnu.org/old-gnu/Manuals/bfd-2.9.1/html_mono/bfd.html#SEC1)
+3. [Tool Interface Standard (TIS) Executable and Linking Format (ELF)  Specification Version 1.2](https://refspecs.linuxfoundation.org/elf/elf.pdf)
+4. [ELF 应用程序二进制接口 - 链接程序和库指南](https://docs.oracle.com/cd/E26926_01/html/E25910/glcfv.html#scrolltoc)
+5. 《程序员的自我修养---链接、装载与库》
+6. [PE Format - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/debug/pe-format)
+7. [LIB BFD, the Binary File Descriptor Library (gnu.org)](https://ftp.gnu.org/old-gnu/Manuals/bfd-2.9.1/html_mono/bfd.html#SEC1)
 
