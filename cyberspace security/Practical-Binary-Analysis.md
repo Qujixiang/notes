@@ -2869,6 +2869,246 @@ Run oracle with -h to show a hint
 
 
 
+#### level 4
+
+现在解锁第四关。
+
+```bash
+$ ./oracle 3a5c381e40d2fffd95ba4452a0fb4a40 -h
+Watch closely while I run
+```
+
+提示`Watch closely while I run`，即"仔细看运行时候的它"。用`ltrace`跟踪它的库调用。
+
+```bash
+$ ltrace ./lvl4
+__libc_start_main(0x4004a0, 1, 0x7ffff7ad5ec8, 0x400650 <unfinished ...>
+setenv("FLAG", "656cf8aecb76113a4dece1688c61d0e7"..., 1)                                                             = 0
++++ exited (status 0) +++
+```
+
+可以看到它调用了`setenv`这个库函数，并且设置了环境变量为`656cf8aecb76113a4dece1688c61d0e7`。大胆猜测这个字符序列即为flag。
+
+```bash
+$ ./oracle 656cf8aecb76113a4dece1688c61d0e7
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+| Level 4 completed, unlocked lvl5         |
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
+Run oracle with -h to show a hint
+```
+
+完成了第四关。
+
+
+
+#### level 5
+
+现在解锁第五关。
+
+```bash
+$ ./oracle 656cf8aecb76113a4dece1688c61d0e7 -h
+Secrets hidden in code unused
+The method of redirection is the key
+   Static rather than dynamically
+```
+
+秘密藏在没有用上的代码里，重定向的方法是key，静态而非动态。
+
+
+
+使用`objdump`查看反汇编指令。
+
+```bash
+$ objdump -M intel lvl5
+...
+Disassembly of section .text:
+
+0000000000400500 <.text>:
+  400500:       48 83 ec 08             sub    rsp,0x8
+  400504:       bf 97 07 40 00          mov    edi,0x400797 # nothing to see here
+  400509:       e8 a2 ff ff ff          call   4004b0 <puts@plt>
+  40050e:       b8 01 00 00 00          mov    eax,0x1
+  400513:       48 83 c4 08             add    rsp,0x8
+  400517:       c3                      ret    
+  400518:       0f 1f 84 00 00 00 00    nop    DWORD PTR [rax+rax*1+0x0]
+  40051f:       00
+  400520:       31 ed                   xor    ebp,ebp
+  400522:       49 89 d1                mov    r9,rdx
+  400525:       5e                      pop    rsi
+  400526:       48 89 e2                mov    rdx,rsp
+  400529:       48 83 e4 f0             and    rsp,0xfffffffffffffff0
+  40052d:       50                      push   rax
+  40052e:       54                      push   rsp
+  40052f:       49 c7 c0 60 07 40 00    mov    r8,0x400760
+  400536:       48 c7 c1 f0 06 40 00    mov    rcx,0x4006f0
+  40053d:       48 c7 c7 00 05 40 00    mov    rdi,0x400500
+  400544:       e8 87 ff ff ff          call   4004d0 <__libc_start_main@plt>
+  400549:       f4                      hlt
+  40054a:       66 0f 1f 44 00 00       nop    WORD PTR [rax+rax*1+0x0]
+  400550:       b8 4f 10 60 00          mov    eax,0x60104f
+  400555:       55                      push   rbp
+  400556:       48 2d 48 10 60 00       sub    rax,0x601048
+  40055c:       48 83 f8 0e             cmp    rax,0xe
+  400560:       48 89 e5                mov    rbp,rsp
+  400563:       76 1b                   jbe    400580 <__gmon_start__@plt+0x90>
+  400565:       b8 00 00 00 00          mov    eax,0x0
+  40056a:       48 85 c0                test   rax,rax
+  40056d:       74 11                   je     400580 <__gmon_start__@plt+0x90>
+  40056f:       5d                      pop    rbp
+  400570:       bf 48 10 60 00          mov    edi,0x601048
+  400575:       ff e0                   jmp    rax
+  400577:       66 0f 1f 84 00 00 00    nop    WORD PTR [rax+rax*1+0x0]
+  40057e:       00 00
+  400580:       5d                      pop    rbp
+  400581:       c3                      ret
+  400582:       0f 1f 40 00             nop    DWORD PTR [rax+0x0]
+  400586:       66 2e 0f 1f 84 00 00    nop    WORD PTR cs:[rax+rax*1+0x0]
+  40058d:       00 00 00
+  400590:       be 48 10 60 00          mov    esi,0x601048
+  400595:       55                      push   rbp
+  400596:       48 81 ee 48 10 60 00    sub    rsi,0x601048
+  40059d:       48 c1 fe 03             sar    rsi,0x3
+  4005a1:       48 89 e5                mov    rbp,rsp
+  4005a4:       48 89 f0                mov    rax,rsi
+  4005a7:       48 c1 e8 3f             shr    rax,0x3f
+  4005ab:       48 01 c6                add    rsi,rax
+  4005ae:       48 d1 fe                sar    rsi,1
+  4005b1:       74 15                   je     4005c8 <__gmon_start__@plt+0xd8>
+  4005b3:       b8 00 00 00 00          mov    eax,0x0
+  4005b8:       48 85 c0                test   rax,rax
+  4005bb:       74 0b                   je     4005c8 <__gmon_start__@plt+0xd8>
+  4005bd:       5d                      pop    rbp
+  4005be:       bf 48 10 60 00          mov    edi,0x601048
+  4005c3:       ff e0                   jmp    rax
+  4005c5:       0f 1f 00                nop    DWORD PTR [rax]
+  4005c8:       5d                      pop    rbp
+  4005c9:       c3                      ret
+  4005ca:       66 0f 1f 44 00 00       nop    WORD PTR [rax+rax*1+0x0]
+  4005d0:       80 3d 71 0a 20 00 00    cmp    BYTE PTR [rip+0x200a71],0x0        # 601048 <__gmon_start__@plt+0x200b58>
+  4005d7:       75 11                   jne    4005ea <__gmon_start__@plt+0xfa>
+  4005d9:       55                      push   rbp
+  4005da:       48 89 e5                mov    rbp,rsp
+  4005dd:       e8 6e ff ff ff          call   400550 <__gmon_start__@plt+0x60>
+  4005e2:       5d                      pop    rbp
+  4005e3:       c6 05 5e 0a 20 00 01    mov    BYTE PTR [rip+0x200a5e],0x1        # 601048 <__gmon_start__@plt+0x200b58>
+  4005ea:       f3 c3                   repz ret
+  4005ec:       0f 1f 40 00             nop    DWORD PTR [rax+0x0]
+  4005f0:       bf 20 0e 60 00          mov    edi,0x600e20
+  4005f5:       48 83 3f 00             cmp    QWORD PTR [rdi],0x0
+  4005f9:       75 05                   jne    400600 <__gmon_start__@plt+0x110>
+  4005fb:       eb 93                   jmp    400590 <__gmon_start__@plt+0xa0>
+  4005fd:       0f 1f 00                nop    DWORD PTR [rax]
+  400600:       b8 00 00 00 00          mov    eax,0x0
+  400605:       48 85 c0                test   rax,rax
+  400608:       74 f1                   je     4005fb <__gmon_start__@plt+0x10b>
+  40060a:       55                      push   rbp
+  40060b:       48 89 e5                mov    rbp,rsp
+  40060e:       ff d0                   call   rax
+  400610:       5d                      pop    rbp
+  400611:       e9 7a ff ff ff          jmp    400590 <__gmon_start__@plt+0xa0>
+  400616:       66 2e 0f 1f 84 00 00    nop    WORD PTR cs:[rax+rax*1+0x0]
+  40061d:       00 00 00
+  400620:       53                      push   rbx
+  400621:       be 74 07 40 00          mov    esi,0x400774 # key = 0x%08x
+  400626:       bf 01 00 00 00          mov    edi,0x1
+  40062b:       48 83 ec 30             sub    rsp,0x30
+  40062f:       64 48 8b 04 25 28 00    mov    rax,QWORD PTR fs:0x28
+  400636:       00 00
+  400638:       48 89 44 24 28          mov    QWORD PTR [rsp+0x28],rax
+  40063d:       31 c0                   xor    eax,eax
+  40063f:       48 b8 10 60 21 33 15    movabs rax,0x6223331533216010
+  400646:       33 23 62
+  400649:       c6 44 24 20 00          mov    BYTE PTR [rsp+0x20],0x0
+  40064e:       48 89 04 24             mov    QWORD PTR [rsp],rax
+  400652:       48 b8 45 65 76 34 41    movabs rax,0x6675364134766545
+  400659:       36 75 66
+  40065c:       48 89 44 24 08          mov    QWORD PTR [rsp+0x8],rax
+  400661:       48 b8 17 67 75 64 10    movabs rax,0x6570331064756717
+  400668:       33 70 65
+  40066b:       48 89 44 24 10          mov    QWORD PTR [rsp+0x10],rax
+  400670:       48 b8 18 35 76 62 11    movabs rax,0x6671671162763518
+  400677:       67 71 66
+  40067a:       48 89 44 24 18          mov    QWORD PTR [rsp+0x18],rax
+  40067f:       8b 1c 25 40 05 40 00    mov    ebx,DWORD PTR ds:0x400540 # key=ebx=0x400500
+  400686:       31 c0                   xor    eax,eax
+  400688:       89 da                   mov    edx,ebx
+  40068a:       e8 51 fe ff ff          call   4004e0 <__printf_chk@plt>
+  40068f:       48 8d 54 24 20          lea    rdx,[rsp+0x20]
+  # 利用key对rsp-rsp+0x1f里的32字节的数据进行加密
+  400694:       48 89 e0                mov    rax,rsp
+  400697:       66 0f 1f 84 00 00 00    nop    WORD PTR [rax+rax*1+0x0]
+  40069e:       00 00
+  4006a0:       31 18                   xor    DWORD PTR [rax],ebx
+  4006a2:       48 83 c0 04             add    rax,0x4
+  4006a6:       48 39 d0                cmp    rax,rdx
+  4006a9:       75 f5                   jne    4006a0 <__gmon_start__@plt+0x1b0>
+  # 加密结束
+  4006ab:       31 c0                   xor    eax,eax
+  4006ad:       48 89 e2                mov    rdx,rsp
+  4006b0:       be 82 07 40 00          mov    esi,0x400782 # decrypted flag = %s
+  4006b5:       bf 01 00 00 00          mov    edi,0x1
+  4006ba:       e8 21 fe ff ff          call   4004e0 <__printf_chk@plt>
+  4006bf:       31 c0                   xor    eax,eax
+  4006c1:       48 8b 4c 24 28          mov    rcx,QWORD PTR [rsp+0x28]
+  4006c6:       64 48 33 0c 25 28 00    xor    rcx,QWORD PTR fs:0x28
+  4006cd:       00 00
+  4006cf:       75 06                   jne    4006d7 <__gmon_start__@plt+0x1e7>
+  4006d1:       48 83 c4 30             add    rsp,0x30
+  4006d5:       5b                      pop    rbx
+  4006d6:       c3                      ret
+  4006d7:       e8 e4 fd ff ff          call   4004c0 <__stack_chk_fail@plt>
+  4006dc:       0f 1f 40 00             nop    DWORD PTR [rax+0x0]
+  4006e0:       bf 97 07 40 00          mov    edi,0x400797 # nothing to see here
+  4006e5:       e9 c6 fd ff ff          jmp    4004b0 <puts@plt>
+  4006ea:       66 0f 1f 44 00 00       nop    WORD PTR [rax+rax*1+0x0]
+  4006f0:       41 57                   push   r15
+  4006f2:       41 56                   push   r14
+  4006f4:       41 89 ff                mov    r15d,edi
+  4006f7:       41 55                   push   r13
+  4006f9:       41 54                   push   r12
+  4006fb:       4c 8d 25 0e 07 20 00    lea    r12,[rip+0x20070e]        # 600e10 <__gmon_start__@plt+0x200920>
+  400702:       55                      push   rbp
+  400703:       48 8d 2d 0e 07 20 00    lea    rbp,[rip+0x20070e]        # 600e18 <__gmon_start__@plt+0x200928>
+  40070a:       53                      push   rbx
+  40070b:       49 89 f6                mov    r14,rsi
+  40070e:       49 89 d5                mov    r13,rdx
+  400711:       4c 29 e5                sub    rbp,r12
+  400714:       48 83 ec 08             sub    rsp,0x8
+  400718:       48 c1 fd 03             sar    rbp,0x3
+  40071c:       e8 5f fd ff ff          call   400480 <puts@plt-0x30>
+  400721:       48 85 ed                test   rbp,rbp
+  400724:       74 20                   je     400746 <__gmon_start__@plt+0x256>
+  400726:       31 db                   xor    ebx,ebx
+  400728:       0f 1f 84 00 00 00 00    nop    DWORD PTR [rax+rax*1+0x0]
+  40072f:       00
+  400730:       4c 89 ea                mov    rdx,r13
+  400733:       4c 89 f6                mov    rsi,r14
+  400736:       44 89 ff                mov    edi,r15d
+  400739:       41 ff 14 dc             call   QWORD PTR [r12+rbx*8]
+  40073d:       48 83 c3 01             add    rbx,0x1
+  400741:       48 39 eb                cmp    rbx,rbp
+  400744:       75 ea                   jne    400730 <__gmon_start__@plt+0x240>
+  400746:       48 83 c4 08             add    rsp,0x8
+  40074a:       5b                      pop    rbx
+  40074b:       5d                      pop    rbp
+  40074c:       41 5c                   pop    r12
+  40074e:       41 5d                   pop    r13
+  400750:       41 5e                   pop    r14
+  400752:       41 5f                   pop    r15
+  400754:       c3                      ret
+  400755:       90                      nop
+  400756:       66 2e 0f 1f 84 00 00    nop    WORD PTR cs:[rax+rax*1+0x0]
+  40075d:       00 00 00
+  400760:       f3 c3                   repz ret
+...
+```
+
+
+
+
+
+
+
 ## 6. 反汇编和二进制分析基础
 
 反汇编可以分为静态反汇编和动态反汇编。
@@ -3161,6 +3401,139 @@ Use-Def链表明了程序任意位置使用的变量可能在哪里被定义。U
 5. 编译器可能会展开循环结构，避免跳转到下一轮迭代的开头。
 6. 优化后的代码可能使用相同的基址寄存器来同时索引不同的数组，从而难以将它们识别为单独的数据结构。
 7. 二进制文件被编译为位置无关代码，以适应像地址空间布局随机化之类的安全功能。与位置相关的二进制文件相比，位置无关的二进制文件不使用绝对地址来引用代码和数据，而使用相对程序计数器的引用，这也意味着某些常见的构造，如ELF二进制文件中的PLT在PIE二进制文件中的外观与在非PIE二进制文件中的外观不同。
+
+
+
+## 7. 简单的ELF代码注入技术
+
+### 7.1 使用十六进制编辑器修改二进制文件
+
+首先使用反汇编程序识别要修改的代码或者数据字节，然后使用十六进制编辑器进行修改。
+
+这种方法简单，但是只允许就地编辑，不能减少会增多字节，也就意味着不能添加和删除代码，因为插入或删除字节会导致后面的所有字节移位到另一个地址，从而破坏对移位字节的引用。正确地识别和修复所有损坏的引用很困难，因为在链接阶段通常会丢弃所需的重定位信息。如果二进制文件包含任何填充字节或者未使用的函数和代码，可以直接用新的代码将其覆盖。但是大部分二进制文件不包含可以覆盖的死字节，所以这种方法有限制。
+
+当调试具有反调试检查的恶意软件时，可以使用十六进制编辑器将nop指令覆盖掉反调试检查指令。
+
+
+
+### 7.2 使用LD_PRELOAD修改共享库行为
+
+`LD_PRELOAD`是影响动态链接器行为的环境变量。
+
+该变量允许指定一个或多个库文件以供链接器在其他库加载之前加载。如果预加载库中的函数与稍后加载的库中的函数同名，则加载的第一个函数将是在运行时使用的函数。这允许使用自定义的函数版本重写库函数。
+
+其中最主要的函数是`dlsym`函数。
+
+```c
+#include <dlfcn.h>
+
+void *dlsym(void *restrict handle, const char *restrict symbol);
+```
+
+`dlsym`接收一个由`dlopen`打开的动态共享库的句柄，除此之外，还可以接收两个特殊的取值：`RTLD_DEFAULT`和`RTLD_NEXT`。
+
+- RTLD_DEFAULT：按默认的动态库查找顺序查找符号第一次出现的位置。
+- RTLD_NEXT：按默认的动态库查找顺序查找符号下一次出现的位置。
+
+`LD_PRELOAD`给出用来覆盖其它动态库的库的绝对路径。
+
+**注意**：GCC编译时要带上选项`-fno-builtin`选项，因为GCC默认会将一些库函数转换为GCC的内置版本，比如将`printf("%s", str)`换成`puts(str)`，把某些函数转换成等效的内联汇编指令而不适用函数调用的形式。
+
+
+
+### 7.3 注入代码节
+
+**PT_NOTE段**：涵盖了二进制文件的节的辅助信息，如它会表明这是一个GNU/Linux操作系统的二进制文件，该二进制文件所期望的内核版本等信息。包含.note.ABI-tag和.note.gnu.build-id两个节。如果缺少这些信息，加载器只会假设它是本机二进制文件。
+
+注入代码节的步骤：
+
+1. 编写二进制代码节`.injected`。
+2. 将`.injected`节拼接到二进制文件的末尾。
+3. 修改`.note.ABI-tag`节头。
+   1. 修改`sh_type`为`SHT_PROGBITS`，表明这是代码节。
+   2. 修改`sh_addr`、`sh_offset`、`sh_size`描述`.injected`节的位置和大小。
+   3. 修改`sh_addralign`为16字节，确保代码被加载到内存中时会正确对齐。
+   4. `sh_flags`添加`SHF_ALLOC | SHF_EXECINSTR`，使其可被分配内存空间并且可执行。
+4. 修改`PT_NOTE`程序头。
+   1. 将`p_type`设置为`PT_LOAD`，表明可以加载该段。
+   2. 修改`p_vaddr`、`p_offset`、`p_filesz`和`p_memsz`。
+   3. 设置`p_flags`为`P_R | P_X`，使其可读可执行。
+
+
+
+### 7.4 调用注入的代码
+
+#### 7.4.1 修改入口点
+
+注入代码节完毕后，再修改ELF文件入口点`e_entry`，将其修改为`.injected`节所在段的首地址。当运行二进制文件时，会直接从`.injected`节开始运行，而不是从旧的入口点开始。
+
+
+
+#### 7.4.2 劫持构造函数和析构函数
+
+编写劫持构造函数或析构函数的注入代码时，最后的指令应为`push.init_array的地址`或者`push .fini_array的地址`。保证执行完毕注入段后能继续运行程序。例如劫持构造函数的伪代码：
+
+```assembly
+BITS 64
+SECTION .text
+global main
+
+main:
+    ...
+    push .init_arry的地址 ; 跳回原始的构造函数
+    ret
+```
+
+修改`.init_array`或者`.fini_array`节的节头表，将其原本的内存地址`sh_addr`修改为`.injected`节的内存地址。
+
+修改完成后二进制文件的执行顺序就变成了：
+
+1. `.init`
+2. `注入的构造节`
+3. `.init_array`
+4. `.text`
+5. `注入的析构节`
+6. `.fini_array`
+
+
+
+#### 7.4.3 劫持GOT项目
+
+修改入口点和劫持构造函数和析构函数都允许注入的代码再二进制文件启动或终止时只运行一次。如果像想要重复调用注入的函数，例如使其替换现有的函数，可以使用劫持GOT条目的方法。
+
+GOT是一个包含指向共享库函数的指针列表，用于动态链接。
+
+具体操作步骤为：将动态链接库函数在`.got.plt`中的地址修改为`.injected`节的地址。
+
+则调用库函数的执行顺序为：
+
+1. `.text`
+2. `.plt`
+3. `.got.plt`
+4. `.injected`
+
+
+
+#### 7.4.4 劫持PLT项目
+
+与劫持GOT项目的方法类似，劫持PLT项目允许为现有库函数插入替换项。因为该方法涉及修改PLT，属于代码节，所以不适合在运行时修改二进制文件的行为。
+
+具体操作步骤为：将动态链接库函数在`.plt`中的指令修改为`jmp .injected的地址`，其它多余字节会变成死代码，永不执行。
+
+则调用库函数的执行顺序为：
+
+1. `.text`
+2. `.plt`
+3. `.injected`
+
+
+
+##### 7.4.5 重定向直接调用和间接调用
+
+当重定向间接调用时，
+
+1. 用直接调用覆盖，但是通常直接调用的指令编码比间接调用的指令长，所以不能安全覆盖。
+2. 用GDB调试可执行文件，找到间接调用的地址，随后在可执行文件的`.rodata`节中搜索地址，将其修改为注入代码的地址。
 
 
 
