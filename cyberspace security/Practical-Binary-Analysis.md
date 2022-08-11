@@ -1,4 +1,4 @@
-# 第一部分、二进制格式
+第一部分、二进制格式
 
 ## 1. 二进制剖析
 
@@ -3537,6 +3537,679 @@ GOT是一个包含指向共享库函数的指针列表，用于动态链接。
 
 
 
+# 第三部分、高级二进制分析
+
+## 8. 自定义反汇编器
+
+### 8.1 自定义反汇编器的理由
+
+1. 通用的工具缺乏高级别自动化分析所需的灵活性，且它们并没有提供调整反汇编过程本身的选项，且并不适用于二进制文件的高效批处理。
+2. 大多数反汇编器，如`objdump`和`IDA Pro`，不会处理混淆代码，反汇编器会错过重叠指令，这使得代码路径被隐藏，从而对程序分析的整体结果产生巨大的影响。
+3. 分析混淆代码，需要完全控制反汇编过程的所有情况，需要完成通用反汇编器无法完成的特定分析。
+4. 需要从多个起始偏移地址反汇编二进制文件，大多数反汇编器均无法支持这种操作。
+5. 需要查找可能的代码序列，包括未对齐的代码序列，可用于ROP漏洞利用。
+6. 通常只需要最基本的反汇编功能，因为这些工具最困难的部分是对反汇编指令的定制化分析，而这个过程不要求丰富的用户接口或便捷性，为了降低成本，可使用免费、开源的反汇编库来构建自定义工具。
+7. 反汇编器中的脚本通常是用高级语言(python等)编写的，具有相对较差的性能。需要构建一个可以在本地运行，并能一次完成所有必要分析的工具，从而极大地提高性能。
+
+
+
+### 8.2 Capstone反汇编框架
+
+> Capstone是一个反汇编框架，提供了一个简单、轻量级的API接口，可透明地处理大多数流行的指令体系，包括x86/x86-64、ARM及MIPS等。Capstone支持C/C++和Python，并且可以在很多操作系统上运行，包含Windows、Linux及macOS，Capstone目前完全免费且开源。
+
+[Capstone项目地址](https://github.com/capstone-engine/capstone)
+
+
+
+#### 8.2.1 Capstone安装
+
+[Capstone在*nix上的安装方法](https://github.com/capstone-engine/capstone/blob/master/COMPILE.TXT)
+
+```bash
+$ ./make.sh                          # 编译Capstone
+$ ./make.sh install                  # 安装Capstone
+$ ls -l /usr/lib | grep capstone     # 查看Capstone的库文件
+-rw-r--r-- 1 root root 10622642 Aug 11 14:18 libcapstone.a
+lrwxrwxrwx 1 root root       16 Aug 11 14:18 libcapstone.so -> libcapstone.so.5
+-rwxr-xr-x 1 root root  8693232 Aug 11 14:18 libcapstone.so.5
+$ ls -l /usr/include/capstone        # 查看Capstone的头文件
+total 376
+-rw-r--r-- 1 root root 60380 Aug 11 14:18 arm64.h
+-rw-r--r-- 1 root root 19787 Aug 11 14:18 arm.h
+-rw-r--r-- 1 root root  4099 Aug 11 14:18 bpf.h
+-rw-r--r-- 1 root root 30920 Aug 11 14:18 capstone.h
+-rw-r--r-- 1 root root  4386 Aug 11 14:18 evm.h
+-rw-r--r-- 1 root root 12320 Aug 11 14:18 m680x.h
+-rw-r--r-- 1 root root 13855 Aug 11 14:18 m68k.h
+-rw-r--r-- 1 root root 17044 Aug 11 14:18 mips.h
+-rw-r--r-- 1 root root  5787 Aug 11 14:18 mos65xx.h
+-rw-r--r-- 1 root root  4010 Aug 11 14:18 platform.h
+-rw-r--r-- 1 root root 38270 Aug 11 14:18 ppc.h
+-rw-r--r-- 1 root root 12649 Aug 11 14:18 riscv.h
+-rw-r--r-- 1 root root 11297 Aug 11 14:18 sparc.h
+-rw-r--r-- 1 root root 44631 Aug 11 14:18 systemz.h
+-rw-r--r-- 1 root root  8262 Aug 11 14:18 tms320c64x.h
+-rw-r--r-- 1 root root  6191 Aug 11 14:18 wasm.h
+-rw-r--r-- 1 root root 43055 Aug 11 14:18 x86.h
+-rw-r--r-- 1 root root  4919 Aug 11 14:18 xcore.h
+```
+
+
+
+#### 8.2.2 Capstone线性反汇编
+
+`basic_capstone_linear.cpp`
+
+```c
+#include <stdio.h>
+#include <string>
+#include <capstone/capstone.h>
+#include "inc/loader.h"
+
+int disasm(Binary *bin);
+
+int main(int argc, char* argv[]) {
+    Binary bin;
+    std::string fname;
+
+    if (argc < 2) {
+        printf("Usage: %s <binary>\n", argv[0]);
+        return 1;
+    }
+    fname.assign(argv[1]);
+    if (load_binary(fname, &bin, Binary::BIN_TYPE_AUTO) < 0) {
+        return 1;
+    }
+
+    if (disasm(&bin) < 0) {
+        return 1;
+    }
+
+    unload_binary(&bin);
+
+    return 0;
+}
+
+int disasm(Binary *bin) {
+    csh dis;
+    cs_insn *insns;
+    Section *text;
+    size_t n;
+
+    text = bin->get_text_section();
+    if (!text) {
+        fprintf(stderr, "Nothing to disassemble\n");
+        return 0;
+    }
+
+    if (cs_open(CS_ARCH_X86, CS_MODE_64, &dis) != CS_ERR_OK) {
+        fprintf(stderr, "Failed to open Capstone\n");
+        return -1;
+    }
+
+    n = cs_disasm(dis, text->bytes, text->size, text->vma, 0, &insns);
+    if (n <= 0) {
+        fprintf(stderr, "Disassembly error: %s\n",
+            cs_strerror(cs_errno(dis)));
+        return -1;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        printf("0x%016jx: ", insns[i].address);
+        for (size_t j = 0; j < 16; j++) {
+            if (j < insns[i].size) printf("%02x ", insns[i].bytes[j]);
+            else printf("   ");
+        }
+        printf("%-12s %s\n", insns[i].mnemonic, insns[i].op_str);
+    }
+
+    cs_free(insns, n);
+    cs_close(&dis);
+
+    return 0;
+}
+```
+
+编译`basic_capstone_linear.cpp`
+
+```bash
+$ g++ -o basic_capstone_linear inc/loader.cpp basic_capstone_linear.cpp -lbfd -lcapstone
+$ ./basic_capstone_linear /bin/ls | head -n 40
+0x00000000000046e0: e8 ab f9 ff ff                                  call         0x4090
+0x00000000000046e5: e8 a6 f9 ff ff                                  call         0x4090
+0x00000000000046ea: e8 a1 f9 ff ff                                  call         0x4090
+0x00000000000046ef: e8 9c f9 ff ff                                  call         0x4090
+0x00000000000046f4: e8 97 f9 ff ff                                  call         0x4090
+0x00000000000046f9: e8 92 f9 ff ff                                  call         0x4090
+0x00000000000046fe: e8 8d f9 ff ff                                  call         0x4090
+0x0000000000004703: e8 88 f9 ff ff                                  call         0x4090
+0x0000000000004708: e8 83 f9 ff ff                                  call         0x4090
+0x000000000000470d: e8 7e f9 ff ff                                  call         0x4090
+0x0000000000004712: e8 79 f9 ff ff                                  call         0x4090
+0x0000000000004717: e8 74 f9 ff ff                                  call         0x4090
+0x000000000000471c: e8 6f f9 ff ff                                  call         0x4090
+0x0000000000004721: e8 6a f9 ff ff                                  call         0x4090
+0x0000000000004726: e8 65 f9 ff ff                                  call         0x4090
+0x000000000000472b: e8 60 f9 ff ff                                  call         0x4090
+0x0000000000004730: e8 5b f9 ff ff                                  call         0x4090
+0x0000000000004735: e8 56 f9 ff ff                                  call         0x4090
+0x000000000000473a: e8 51 f9 ff ff                                  call         0x4090
+0x000000000000473f: e8 4c f9 ff ff                                  call         0x4090
+0x0000000000004744: e8 47 f9 ff ff                                  call         0x4090
+0x0000000000004749: e8 42 f9 ff ff                                  call         0x4090
+0x000000000000474e: e8 3d f9 ff ff                                  call         0x4090
+0x0000000000004753: e8 38 f9 ff ff                                  call         0x4090
+0x0000000000004758: 0f 1f 84 00 00 00 00 00                         nop          dword ptr [rax + rax]
+0x0000000000004760: 41 57                                           push         r15
+0x0000000000004762: 41 56                                           push         r14
+0x0000000000004764: 41 55                                           push         r13
+0x0000000000004766: 41 54                                           push         r12
+0x0000000000004768: 55                                              push         rbp
+0x0000000000004769: 89 fd                                           mov          ebp, edi
+0x000000000000476b: 53                                              push         rbx
+0x000000000000476c: 48 89 f3                                        mov          rbx, rsi
+0x000000000000476f: 48 83 ec 48                                     sub          rsp, 0x48
+0x0000000000004773: 48 8b 3e                                        mov          rdi, qword ptr [rsi]
+0x0000000000004776: 64 48 8b 04 25 28 00 00 00                      mov          rax, qword ptr fs:[0x28]
+0x000000000000477f: 48 89 44 24 38                                  mov          qword ptr [rsp + 0x38], rax
+0x0000000000004784: 31 c0                                           xor          eax, eax
+0x0000000000004786: e8 05 f6 00 00                                  call         0x13d90
+0x000000000000478b: 48 8d 35 f6 60 01 00                            lea          rsi, [rip + 0x160f6]
+```
+
+
+
+#### 8.2.3 Capstone递归反汇编
+
+如果没开启详细反汇编模式，Capstone只允许查看有关指令的基 本信息，如地址、原始字节、助记符等。正如前例中，对于线性反汇 编器，这些基本信息可满足需求。但是高级的二进制分析工具常需要 根据指令属性分别处理，如指令访问的寄存器、操作数的类型和值、 指令的类型（算术型、控制流型等），或者控制流指令的目标地址 等。然而，这样的详细信息只能在Capstone的详细反汇编模式中找 到。
+
+`basic_capstone_recursive.cpp`
+
+```c
+#include <stdio.h>
+#include <queue>
+#include <map>
+#include <string>
+#include <capstone/capstone.h>
+#include "inc/loader.h"
+
+void print_ins(cs_insn *ins)
+{
+  printf("0x%016jx: ", ins->address);
+  for(size_t i = 0; i < 16; i++) {
+    if(i < ins->size) printf("%02x ", ins->bytes[i]);
+    else printf("   ");
+  }
+  printf("%-12s %s\n", ins->mnemonic, ins->op_str);
+}
+
+bool is_cs_cflow_group(uint8_t g)
+{
+  return (g == CS_GRP_JUMP) || (g == CS_GRP_CALL) 
+          || (g == CS_GRP_RET) || (g == CS_GRP_IRET);
+}
+
+bool is_cs_cflow_ins(cs_insn *ins)
+{
+  for(size_t i = 0; i < ins->detail->groups_count; i++) {
+    if(is_cs_cflow_group(ins->detail->groups[i])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool is_cs_unconditional_cflow_ins(cs_insn *ins)
+{
+  switch(ins->id) {
+  case X86_INS_JMP:
+  case X86_INS_LJMP:
+  case X86_INS_RET:
+  case X86_INS_RETF:
+  case X86_INS_RETFQ:
+    return true;
+  default:
+    return false;
+  }
+}
+
+uint64_t get_cs_ins_immediate_target(cs_insn *ins)
+{
+  cs_x86_op *cs_op;
+
+  for(size_t i = 0; i < ins->detail->groups_count; i++) {
+    if(is_cs_cflow_group(ins->detail->groups[i])) {
+      for(size_t j = 0; j < ins->detail->x86.op_count; j++) {
+        cs_op = &ins->detail->x86.operands[j];
+        if(cs_op->type == X86_OP_IMM) {
+          return cs_op->imm;
+        } 
+      }
+    }
+  }
+
+  return 0;
+}
+
+int disasm(Binary *bin)
+{
+  csh dis;
+  cs_insn *cs_ins;
+  Section *text;
+  size_t n;
+  const uint8_t *pc;
+  uint64_t addr, offset, target;
+  std::queue<uint64_t> Q;
+  std::map<uint64_t, bool> seen;
+
+  text = bin->get_text_section();
+  if(!text) {
+    fprintf(stderr, "Nothing to disassemble\n");
+    return 0;
+  }
+
+  if(cs_open(CS_ARCH_X86, CS_MODE_64, &dis) != CS_ERR_OK) {
+    fprintf(stderr, "Failed to open Capstone\n");
+    return -1;
+  }
+  cs_option(dis, CS_OPT_DETAIL, CS_OPT_ON);
+
+  cs_ins = cs_malloc(dis);
+  if(!cs_ins) {
+    fprintf(stderr, "Out of memory\n");
+    cs_close(&dis);
+    return -1;
+  }
+
+  addr = bin->entry;
+  if(text->contains(addr)) Q.push(addr);
+  printf("entry point: 0x%016jx\n", addr);
+
+  for(auto &sym: bin->symbols) {
+    if(sym.type == Symbol::SYM_TYPE_FUNC
+       && text->contains(sym.addr)) {
+      Q.push(sym.addr);
+      printf("function symbol: 0x%016jx\n", sym.addr);
+    }
+  }
+
+  while(!Q.empty()) {
+    addr = Q.front();
+    Q.pop();
+    if(seen[addr]) {
+      printf("ignoring addr 0x%016jx (already seen)\n", addr);
+      continue;
+    }
+
+    offset = addr - text->vma;
+    pc     = text->bytes + offset;
+    n      = text->size - offset;
+    while(cs_disasm_iter(dis, &pc, &n, &addr, cs_ins)) {
+      if(cs_ins->id == X86_INS_INVALID || cs_ins->size == 0) {
+        break;
+      }
+
+      seen[cs_ins->address] = true;
+      print_ins(cs_ins);
+
+      if(is_cs_cflow_ins(cs_ins)) {
+        target = get_cs_ins_immediate_target(cs_ins);
+        if(target && !seen[target] && text->contains(target)) {
+          Q.push(target);
+          printf("  -> new target: 0x%016jx\n", target);
+        }
+        if(is_cs_unconditional_cflow_ins(cs_ins)) {
+          break;
+        }
+      } else if(cs_ins->id == X86_INS_HLT) break;
+    }
+    printf("----------\n");
+  }
+
+  cs_free(cs_ins, 1);
+  cs_close(&dis);
+
+  return 0;
+}
+
+int main(int argc, char *argv[])
+{
+  Binary bin;
+  std::string fname;
+
+  if(argc < 2) {
+    printf("Usage: %s <binary>\n", argv[0]);
+    return 1;
+  }
+
+  fname.assign(argv[1]);
+  if(load_binary(fname, &bin, Binary::BIN_TYPE_AUTO) < 0) {
+    return 1;
+  }
+
+  if(disasm(&bin) < 0) {
+    return 1;
+  }
+
+  unload_binary(&bin);
+
+  return 0;
+}
+```
+
+编译`basic_capstone_recursive.cpp`
+
+```bash
+$ g++ -o basic_capstone_recursive inc/loader.cpp basic_capstone_recursive.cpp -lbfd -lcapstone
+$ ./basic_capstone_recursive /bin/ls | head -n 40
+./basic_capstone_recursive overlapping_bb
+entry point: 0x0000000000001080
+function symbol: 0x00000000000010b0
+function symbol: 0x00000000000010e0
+function symbol: 0x0000000000001120
+function symbol: 0x0000000000001160
+function symbol: 0x0000000000001240
+function symbol: 0x00000000000011e0
+function symbol: 0x0000000000001080
+function symbol: 0x000000000000118c
+function symbol: 0x0000000000001165
+0x0000000000001080: 31 ed                                           xor          ebp, ebp
+0x0000000000001082: 49 89 d1                                        mov          r9, rdx
+0x0000000000001085: 5e                                              pop          rsi
+0x0000000000001086: 48 89 e2                                        mov          rdx, rsp
+0x0000000000001089: 48 83 e4 f0                                     and          rsp, 0xfffffffffffffff0
+0x000000000000108d: 50                                              push         rax
+0x000000000000108e: 54                                              push         rsp
+0x000000000000108f: 4c 8d 05 aa 01 00 00                            lea          r8, [rip + 0x1aa]
+0x0000000000001096: 48 8d 0d 43 01 00 00                            lea          rcx, [rip + 0x143]
+0x000000000000109d: 48 8d 3d e8 00 00 00                            lea          rdi, [rip + 0xe8]
+0x00000000000010a4: ff 15 36 2f 00 00                               call         qword ptr [rip + 0x2f36]
+0x00000000000010aa: f4                                              hlt
+----------
+0x00000000000010b0: 48 8d 3d 91 2f 00 00                            lea          rdi, [rip + 0x2f91]
+0x00000000000010b7: 48 8d 05 8a 2f 00 00                            lea          rax, [rip + 0x2f8a]
+0x00000000000010be: 48 39 f8                                        cmp          rax, rdi
+0x00000000000010c1: 74 15                                           je           0x10d8
+  -> new target: 0x00000000000010d8
+0x00000000000010c3: 48 8b 05 0e 2f 00 00                            mov          rax, qword ptr [rip + 0x2f0e]
+0x00000000000010ca: 48 85 c0                                        test         rax, rax
+0x00000000000010cd: 74 09                                           je           0x10d8
+  -> new target: 0x00000000000010d8
+0x00000000000010cf: ff e0                                           jmp          rax
+----------
+...
+0x0000000000001165: 55                                              push         rbp
+0x0000000000001166: 48 89 e5                                        mov          rbp, rsp
+0x0000000000001169: 89 7d ec                                        mov          dword ptr [rbp - 0x14], edi
+0x000000000000116c: c7 45 fc 00 00 00 00                            mov          dword ptr [rbp - 4], 0
+0x0000000000001173: 8b 45 ec                                        mov          eax, dword ptr [rbp - 0x14]
+0x0000000000001176: 83 f8 00                                        cmp          eax, 0
+0x0000000000001179: 0f 85 02 00 00 00                               jne          0x1181
+  -> new target: 0x0000000000001181
+0x000000000000117f: 83 f0 04                                        xor          eax, 4
+0x0000000000001182: 04 90                                           add          al, 0x90
+0x0000000000001184: 89 45 fc                                        mov          dword ptr [rbp - 4], eax
+0x0000000000001187: 8b 45 fc                                        mov          eax, dword ptr [rbp - 4]
+0x000000000000118a: 5d                                              pop          rbp
+0x000000000000118b: c3                                              ret
+----------
+...
+0x0000000000001181: 04 04                                           add          al, 4
+0x0000000000001183: 90                                              nop
+0x0000000000001184: 89 45 fc                                        mov          dword ptr [rbp - 4], eax
+0x0000000000001187: 8b 45 fc                                        mov          eax, dword ptr [rbp - 4]
+0x000000000000118a: 5d                                              pop          rbp
+0x000000000000118b: c3                                              ret
+----------
+```
+
+可以看到`0x0000000000001179: 0f 85 02 00 00 00  jne  0x1181`处有两条路径，一条是从0x117f处顺序执行（会越过0x1181），另一条是跳转到0x1181处开始执行，通过递归反汇编的方式，可以将两个分支的汇编代码都打印出来，说明反汇编程序在混淆二进制文件中成功找到了两个重叠的代码块。
+
+
+
+### 8.3 实现ROP扫描器
+
+#### 8.3.1 ROP简介
+
+将恶意代码注入到目标应用程序的堆栈上，然后利用漏洞将控制流重定向恶意代码上。针对此类经典漏洞的防御措施是**数据执行保护(Data Execution Prevention, DEP)**，也称作**NX**，DEP会强制任何内存区域都不能同时可写和可执行。因此，即使攻击者将代码注入到栈上，他们也不能执行代码。
+
+随着 NX 保护的开启，以往直接向栈或者堆上直接注入代码的方式难以继续发挥效果。攻击者们也提出来相应的方法来绕过保护，目前主要的是 ROP(Return Oriented Programming)，其主要思想是在**栈缓冲区溢出的基础上，利用程序中已有的小片段 (gadgets) 来改变某些寄存器或者变量的值，从而控制程序的执行流程。**所谓 gadgets 就是以 ret 结尾的指令序列，通过这些指令序列，我们可以修改某些地址的内容，方便控制程序的执行流程。
+
+之所以称之为 ROP，是因为核心在于利用了指令集中的 ret 指令，改变了指令流的执行顺序。ROP 攻击一般得满足如下条件
+
+- 程序存在溢出，并且可以控制返回地址。
+- 可以找到满足条件的 gadgets 以及相应 gadgets 的地址。
+
+如果 gadgets 每次的地址是不固定的，那我们就需要想办法动态获取对应的地址了。
+
+C语言函数调用栈：
+
+![C语言函数调用栈](assets/Practical-Binary-Analysis/image-20220811185707979.png)
+
+即将栈溢出ROP的函数栈：
+
+![即将栈溢出ROP的函数栈](assets/Practical-Binary-Analysis/image-20220811190122425.png)
+
+栈溢出ROP的函数栈：
+
+![栈溢出ROP的函数栈](assets/Practical-Binary-Analysis/image-20220811190745522.png)
+
+ROP包含以下几种类型的栈溢出攻击：
+
+- **ret2text**: 即控制程序执行程序本身已有的的代码 (`.text`)。
+
+![ret2text](assets/Practical-Binary-Analysis/image-20220811220854945.png)
+
+- **ret2shellcode**: 即控制程序执行 shellcode 代码。shellcode 指的是用于完成某个功能的汇编代码，常见的功能主要是获取目标系统的 shell。一般来说，shellcode 需要我们自己填充。这其实是另外一种典型的利用方法，即此时我们需要自己去填充一些可执行的代码。
+
+![ret2shellcode](assets/Practical-Binary-Analysis/image-20220811230001093.png)
+
+- **ret2syscall**: 即控制程序执行系统调用(`int 80h`)，获取 shell。
+
+![ret2syscall](assets/Practical-Binary-Analysis/image-20220811225038769.png)
+
+- **ret2libc**: 即控制函数的执行 libc 中的函数，通常是返回至某个函数的 plt 处或者函数的具体位置 (即函数对应的 got 表项的内容)。一般情况下，我们会选择执行`system("/bin/sh")`，故而此时我们需要知道 system 函数的地址。
+
+![ret2libc](assets/Practical-Binary-Analysis/image-20220811230937701.png)
+
+
+
+#### 8.3.2 寻找ROP的gadget
+
+ROP gadget的特征：
+
+- 以`ret`指令结尾。
+- 可用的gadget应该有简单的语义，所以gadget不应太长。
+
+实现ROP gadget finder的思路：
+
+- 从`ret`指令向回搜索，从`ret`地址的前一个字节开始，在每次循环迭代中递减搜索地址，直到从`ret`指令向回搜索15*5字节（x86指令不超过15字节，设定gadget的最大指令数量为5）。
+- 如果遇到无效指令，则中断此次线性扫描，递减搜索地址，继续下一轮扫描。
+- 如果查找器遇到超出根指令地址之外的指令，则中断此次线性扫描，递减搜索地址，继续下一轮扫描。
+- 如果查找器遇到控制流指令而非返回指令，则中断此次线性扫描，递减搜索地址，继续下一轮扫描。
+- 如果查找器遇到指令数超出gadget的最大指令数量，则中断此次线性扫描，递减搜索地址，继续下一轮扫描。
+- 反汇编到`ret`指令处时，将此次扫描的指令流和指令流的起始地址存到`map`中。
+
+`capstone_gadget_finder.cpp`
+
+```c
+#include <stdio.h>
+#include <map>
+#include <vector>
+#include <string>
+#include <capstone/capstone.h>
+#include "inc/loader.h"
+
+bool is_cs_cflow_group(uint8_t g)
+{
+  return (g == CS_GRP_JUMP) || (g == CS_GRP_CALL) 
+          || (g == CS_GRP_RET) || (g == CS_GRP_IRET);
+}
+
+bool is_cs_cflow_ins(cs_insn *ins)
+{
+  for(size_t i = 0; i < ins->detail->groups_count; i++) {
+    if(is_cs_cflow_group(ins->detail->groups[i])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool is_cs_ret_ins(cs_insn *ins)
+{
+  switch(ins->id) {
+  case X86_INS_RET:
+    return true;
+  default:
+    return false;
+  }
+}
+
+int find_gadgets_at_root(Section *text, uint64_t root, 
+                     std::map<std::string, std::vector<uint64_t> > *gadgets, 
+                     csh dis)
+{
+  size_t n, len;
+  const uint8_t *pc;
+  uint64_t offset, addr;
+  std::string gadget_str;
+  cs_insn *cs_ins; 
+
+  const size_t max_gadget_len    = 5; /* instructions */
+  const size_t x86_max_ins_bytes = 15;
+  const uint64_t root_offset     = max_gadget_len*x86_max_ins_bytes;
+
+  cs_ins = cs_malloc(dis);
+  if(!cs_ins) {
+    fprintf(stderr, "Out of memory\n");
+    return -1;
+  }
+
+  for(uint64_t a = root-1; 
+               a >= root-root_offset && a >= 0;
+               a--) {
+    addr   = a;
+    offset = addr - text->vma;
+    pc     = text->bytes + offset;
+    n      = text->size - offset;
+    len    = 0;
+    gadget_str = "";
+    while(cs_disasm_iter(dis, &pc, &n, &addr, cs_ins)) {
+      if(cs_ins->id == X86_INS_INVALID || cs_ins->size == 0) {
+        break;
+      } else if(cs_ins->address > root) {
+        break;
+      } else if(is_cs_cflow_ins(cs_ins) && !is_cs_ret_ins(cs_ins)) {
+        break;
+      } else if(++len > max_gadget_len) {
+        break;
+      }
+
+      gadget_str += std::string(cs_ins->mnemonic) 
+                    + " " + std::string(cs_ins->op_str);
+
+      if(cs_ins->address == root) {
+        (*gadgets)[gadget_str].push_back(a);
+        break;
+      }
+
+      gadget_str += "; ";
+    }
+  }
+
+  cs_free(cs_ins, 1);
+
+  return 0;
+}
+
+int find_gadgets(Binary *bin)
+{
+  csh dis;
+  Section *text;
+  std::map<std::string, std::vector<uint64_t> > gadgets;
+ 
+  const uint8_t x86_opc_ret = 0xc3;
+
+  text = bin->get_text_section();
+  if(!text) {
+    fprintf(stderr, "Nothing to disassemble\n");
+    return 0;
+  }
+
+  if(cs_open(CS_ARCH_X86, CS_MODE_64, &dis) != CS_ERR_OK) {
+    fprintf(stderr, "Failed to open Capstone\n");
+    return -1;
+  }
+  cs_option(dis, CS_OPT_DETAIL, CS_OPT_ON);
+
+  for(size_t i = 0; i < text->size; i++) {
+    if(text->bytes[i] == x86_opc_ret) {
+      if(find_gadgets_at_root(text, text->vma+i, &gadgets, dis) < 0) {
+        break;
+      }
+    }
+  }
+
+  for(auto &kv: gadgets) {
+    printf("%-120s\t[ ", kv.first.c_str());
+    for(auto addr: kv.second) {
+      printf("0x%jx ", addr);
+    }
+    printf("]\n");
+  }
+
+  cs_close(&dis);
+
+  return 0;
+}
+
+int main(int argc, char *argv[])
+{
+  Binary bin;
+  std::string fname;
+
+  if(argc < 2) {
+    printf("Usage: %s <binary>\n", argv[0]);
+    return 1;
+  }
+
+  fname.assign(argv[1]);
+  if(load_binary(fname, &bin, Binary::BIN_TYPE_AUTO) < 0) {
+    return 1;
+  }
+
+  if(find_gadgets(&bin) < 0) {
+    return 1;
+  }
+
+  unload_binary(&bin);
+
+  return 0;
+}
+```
+
+编译`capstone_gadget_finder.cpp`
+
+```bash
+$ g++ capstone_gadget_finder.cpp inc/loader.cpp -o capstone_gadget_finder -lbfd -lcapstone
+$ ./capstone_gadget_finder /bin/ls | head -n 10
+adc al, 0x85; ror byte ptr [rdi], 0x84; add al, byte ptr [r8]; add byte ptr [rbx - 0x7af0fe08], al; ret                 [ 0xe1ae ]
+adc bl, al; nop word ptr cs:[rax + rax]; mov rax, qword ptr [rdi + 0x18]; ret                                           [ 0xf603 ]
+adc bl, byte ptr [rbp + 0x41]; pop rsp; pop r13; ret                                                                    [ 0xa479 0xa4e9 ]
+adc byte ptr [r11 + 0x5d], bl; pop r12; ret                                                                             [ 0x112cf 0x1147f ]
+adc byte ptr [r15], r9b; add dword ptr [rdi + 0x53], -1; dec dword ptr [rax - 0x77]; ret                                [ 0xf3a0 ]
+adc byte ptr [r15], r9b; cmp dword ptr [rbx + 0x4e], -1; dec dword ptr [rax - 0x77]; ret                                [ 0xf876 ]
+adc byte ptr [r8], r8b; mov qword ptr [rdi], rax; movabs rax, 0x3fb4fdf43f4ccccd; mov qword ptr [rdi + 8], rax; ret     [ 0xfabb ]
+adc byte ptr [rax + 1], bh; ret                                                                                         [ 0x697b 0x6d3b ]
+adc byte ptr [rax - 0x77], cl; ret                                                                                      [ 0x11318 0x113fe 0x114c8 0x115ae ]
+adc byte ptr [rax - 0x7d], cl; ret                                                                                      [ 0x7739 0xd753 ]
+```
+
+
+
 ## 参考
 
 1. 《编译系统透视：图解编译原理》，第8章-预处理
@@ -3546,4 +4219,5 @@ GOT是一个包含指向共享库函数的指针列表，用于动态链接。
 5. 《程序员的自我修养---链接、装载与库》
 6. [PE Format - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/debug/pe-format)
 7. [LIB BFD, the Binary File Descriptor Library (gnu.org)](https://ftp.gnu.org/old-gnu/Manuals/bfd-2.9.1/html_mono/bfd.html#SEC1)
+7. [基本 ROP - CTF Wiki (ctf-wiki.org)](https://ctf-wiki.org/pwn/linux/user-mode/stackoverflow/x86/basic-rop/)
 
