@@ -3,7 +3,7 @@
 #include <vector>
 #include <string>
 #include <capstone/capstone.h>
-#include "inc/loader.h"
+#include "../inc/loader.h"
 
 bool is_cs_cflow_group(uint8_t g)
 {

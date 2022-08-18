@@ -1,4 +1,4 @@
-#include "inc/loader.h"
+#include "../inc/loader.h"
 
 int main(int argc, char* argv[])
 {

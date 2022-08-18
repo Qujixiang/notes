@@ -3,7 +3,7 @@
 #include <map>
 #include <string>
 #include <capstone/capstone.h>
-#include "inc/loader.h"
+#include "../inc/loader.h"
 
 void print_ins(cs_insn *ins)
 {

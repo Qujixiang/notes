@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string>
 #include <capstone/capstone.h>
-#include "inc/loader.h"
+#include "../inc/loader.h"
 
 int disasm(Binary *bin);
 

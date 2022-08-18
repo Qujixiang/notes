@@ -899,73 +899,78 @@ PE特有而ELF没有的节中比较重要的是`.edata`和`.idata`。`DataDirect
 下例中的代码是用`MinGW`编译，所以使用了`nop`指令填充，使得代码以8字节对齐，从而使得访问时只需要一次访存即可获取整个指令。而用`MSVC`编译后的PE文件会用`int3`指令填充，该指令用于调试，在没有调试器而执行时会导致程序崩溃，但是`jmp`指令跳转到其它地方，而不会执行其之后的`int3`指令，所以可以用`int3`指令在这里填充。
 
 ```bash
-$ objdump -M intel -d 3_1_pe_header.exe
-
-...
-
-0000000000402a40 <vfprintf>:
-  402a40:       ff 25 16 59 00 00       jmp    QWORD PTR [rip+0x5916]        # 40835c <__imp_vfprintf>
-  402a46:       90                      nop
-  402a47:       90                      nop
-
-0000000000402a48 <strncmp>:
-  402a48:       ff 25 06 59 00 00       jmp    QWORD PTR [rip+0x5906]        # 408354 <__imp_strncmp>
-  402a4e:       90                      nop
-  402a4f:       90                      nop
-
-0000000000402a50 <strlen>:
-  402a50:       ff 25 f6 58 00 00       jmp    QWORD PTR [rip+0x58f6]        # 40834c <__imp_strlen>
-  402a56:       90                      nop
-  402a57:       90                      nop
-
-0000000000402a58 <signal>:
-  402a58:       ff 25 e6 58 00 00       jmp    QWORD PTR [rip+0x58e6]        # 408344 <__imp_signal>
-  402a5e:       90                      nop
-  402a5f:       90                      nop
-
-0000000000402a60 <puts>:
-  402a60:       ff 25 d6 58 00 00       jmp    QWORD PTR [rip+0x58d6]        # 40833c <__imp_puts>
-  402a66:       90                      nop
-  402a67:       90                      nop
+$ objdump -M intel -d /bin/ls | grep jmp | head
+  4022e6:       ff 25 24 bd 21 00       jmp    QWORD PTR [rip+0x21bd24]        # 61e010 <_fini@@Base+0x20a3b4>
+  4022f0:       ff 25 22 bd 21 00       jmp    QWORD PTR [rip+0x21bd22]        # 61e018 <_fini@@Base+0x20a3bc>
+  4022fb:       e9 e0 ff ff ff          jmp    4022e0 <_init@@Base+0x28>
+  402300:       ff 25 1a bd 21 00       jmp    QWORD PTR [rip+0x21bd1a]        # 61e020 <_fini@@Base+0x20a3c4>
+  40230b:       e9 d0 ff ff ff          jmp    4022e0 <_init@@Base+0x28>
+  402310:       ff 25 12 bd 21 00       jmp    QWORD PTR [rip+0x21bd12]        # 61e028 <_fini@@Base+0x20a3cc>
+  40231b:       e9 c0 ff ff ff          jmp    4022e0 <_init@@Base+0x28>
+  402320:       ff 25 0a bd 21 00       jmp    QWORD PTR [rip+0x21bd0a]        # 61e030 <_fini@@Base+0x20a3d4>
+  40232b:       e9 b0 ff ff ff          jmp    4022e0 <_init@@Base+0x28>
+  402330:       ff 25 02 bd 21 00       jmp    QWORD PTR [rip+0x21bd02] 
  
- ...
- 
- $ objdump -h 3_1_pe_header.exe
- 
-3_1_pe_header.exe:     file format pei-x86-64
+ $ objdump -h /bin/ls
+
+/bin/ls:     file format elf64-x86-64
 
 Sections:
 Idx Name          Size      VMA               LMA               File off  Algn
-  0 .text         00001cc8  0000000000401000  0000000000401000  00000400  2**4
-                  CONTENTS, ALLOC, LOAD, READONLY, CODE, DATA
-  1 .data         000000d0  0000000000403000  0000000000403000  00002200  2**4
+  0 .interp       0000001c  0000000000400238  0000000000400238  00000238  2**0
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  1 .note.ABI-tag 00000020  0000000000400254  0000000000400254  00000254  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  2 .note.gnu.build-id 00000024  0000000000400274  0000000000400274  00000274  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  3 .gnu.hash     000000c0  0000000000400298  0000000000400298  00000298  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  4 .dynsym       00000cd8  0000000000400358  0000000000400358  00000358  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  5 .dynstr       000005dc  0000000000401030  0000000000401030  00001030  2**0
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  6 .gnu.version  00000112  000000000040160c  000000000040160c  0000160c  2**1
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  7 .gnu.version_r 00000070  0000000000401720  0000000000401720  00001720  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  8 .rela.dyn     000000a8  0000000000401790  0000000000401790  00001790  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  9 .rela.plt     00000a80  0000000000401838  0000000000401838  00001838  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 10 .init         0000001a  00000000004022b8  00000000004022b8  000022b8  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 11 .plt          00000710  00000000004022e0  00000000004022e0  000022e0  2**4
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 12 .plt.got      00000008  00000000004029f0  00000000004029f0  000029f0  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 13 .text         00011259  0000000000402a00  0000000000402a00  00002a00  2**4
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 14 .fini         00000009  0000000000413c5c  0000000000413c5c  00013c5c  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 15 .rodata       00006974  0000000000413c80  0000000000413c80  00013c80  2**5
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 16 .eh_frame_hdr 00000804  000000000041a5f4  000000000041a5f4  0001a5f4  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 17 .eh_frame     00002c6c  000000000041adf8  000000000041adf8  0001adf8  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 18 .init_array   00000008  000000000061de00  000000000061de00  0001de00  2**3
                   CONTENTS, ALLOC, LOAD, DATA
-  2 .rdata        000004d0  0000000000404000  0000000000404000  00002400  2**5
-                  CONTENTS, ALLOC, LOAD, READONLY, DATA
-  3 .pdata        00000270  0000000000405000  0000000000405000  00002a00  2**2
-                  CONTENTS, ALLOC, LOAD, READONLY, DATA
-  4 .xdata        000001f4  0000000000406000  0000000000406000  00002e00  2**2
-                  CONTENTS, ALLOC, LOAD, READONLY, DATA
-  5 .bss          00000980  0000000000407000  0000000000407000  00000000  2**5
+ 19 .fini_array   00000008  000000000061de08  000000000061de08  0001de08  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+ 20 .jcr          00000008  000000000061de10  000000000061de10  0001de10  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+ 21 .dynamic      000001e0  000000000061de18  000000000061de18  0001de18  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+ 22 .got          00000008  000000000061dff8  000000000061dff8  0001dff8  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+ 23 .got.plt      00000398  000000000061e000  000000000061e000  0001e000  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+ 24 .data         00000260  000000000061e3a0  000000000061e3a0  0001e3a0  2**5
+                  CONTENTS, ALLOC, LOAD, DATA
+ 25 .bss          00000d68  000000000061e600  000000000061e600  0001e600  2**5
                   ALLOC
-  6 .idata        0000076c  0000000000408000  0000000000408000  00003000  2**2
-                  CONTENTS, ALLOC, LOAD, DATA
-  7 .CRT          00000068  0000000000409000  0000000000409000  00003800  2**3
-                  CONTENTS, ALLOC, LOAD, DATA
-  8 .tls          00000010  000000000040a000  000000000040a000  00003a00  2**3
-                  CONTENTS, ALLOC, LOAD, DATA
-  9 .debug_aranges 00000050  000000000040b000  000000000040b000  00003c00  2**4
-                  CONTENTS, READONLY, DEBUGGING
- 10 .debug_info   00001f08  000000000040c000  000000000040c000  00003e00  2**0
-                  CONTENTS, READONLY, DEBUGGING
- 11 .debug_abbrev 00000149  000000000040e000  000000000040e000  00005e00  2**0
-                  CONTENTS, READONLY, DEBUGGING
- 12 .debug_line   00000222  000000000040f000  000000000040f000  00006000  2**0
-                  CONTENTS, READONLY, DEBUGGING
- 13 .debug_frame  00000048  0000000000410000  0000000000410000  00006400  2**3
-                  CONTENTS, READONLY, DEBUGGING
- 14 .debug_str    0000009b  0000000000411000  0000000000411000  00006600  2**0
-                  CONTENTS, READONLY, DEBUGGING
+ 26 .gnu_debuglink 00000034  0000000000000000  0000000000000000  0001e600  2**0
+                  CONTENTS, READONLY
 ```
 
 
@@ -1919,81 +1924,199 @@ cleanup:
 
 ### 4.13 测试ELF文件
 
-编译&链接。这里是用`MinGW-W64-builds-5.0.0`在`Windows11`的`PowerShell`上编译的。
+编译&链接。
 
 ```bash
-$ g++ loader_demo.cpp inc/loader.cpp -lbfd -liberty -lz -o loader_demo.exe
+$ g++ loader_demo.cpp inc/loader.cpp -lbfd -o loader_demo
 ```
 
 解析ELF文件。
 
 ```bash
-$ ./loader_demo.exe 4_1_elf_binary.out .rodata
+$ ./loader_demo /bin/ls .rodata
 
-loaded binary '4_1_elf_binary.out' elf64-x86-64/i386:x86-64 (64bits) entry@0x0000000000001060
+loaded binary '/bin/ls' elf64-x86-64/i386:x86-64 (64bits) entry@0x00000000004049a0
 
 sections:
   VMA                Size     Name                 Type
-  0x00000000000002a8 28       .interp              DATA
-  0x00000000000002c4 36       .note.gnu.build-id   DATA
-  0x00000000000002e8 32       .note.ABI-tag        DATA
-  0x0000000000000308 36       .gnu.hash            DATA
-  0x0000000000000330 192      .dynsym              DATA
-  0x00000000000003f0 138      .dynstr              DATA
-  0x000000000000047a 16       .gnu.version         DATA
-  0x0000000000000490 32       .gnu.version_r       DATA
-  0x00000000000004b0 192      .rela.dyn            DATA
-  0x0000000000000570 48       .rela.plt            DATA
-  0x0000000000001000 23       .init                CODE
-  0x0000000000001020 48       .plt                 CODE
-  0x0000000000001050 8        .plt.got             CODE
-  0x0000000000001060 433      .text                CODE
-  0x0000000000001214 9        .fini                CODE
-  0x0000000000002000 40       .rodata              DATA
-  0x0000000000002028 60       .eh_frame_hdr        DATA
-  0x0000000000002068 264      .eh_frame            DATA
-  0x0000000000003de8 8        .init_array          DATA
-  0x0000000000003df0 8        .fini_array          DATA
-  0x0000000000003df8 480      .dynamic             DATA
-  0x0000000000003fd8 40       .got                 DATA
-  0x0000000000004000 40       .got.plt             DATA
-  0x0000000000004028 20       .data                DATA
+  0x0000000000400238 28       .interp              DATA
+  0x0000000000400254 32       .note.ABI-tag        DATA
+  0x0000000000400274 36       .note.gnu.build-id   DATA
+  0x0000000000400298 192      .gnu.hash            DATA
+  0x0000000000400358 3288     .dynsym              DATA
+  0x0000000000401030 1500     .dynstr              DATA
+  0x000000000040160c 274      .gnu.version         DATA
+  0x0000000000401720 112      .gnu.version_r       DATA
+  0x0000000000401790 168      .rela.dyn            DATA
+  0x0000000000401838 2688     .rela.plt            DATA
+  0x00000000004022b8 26       .init                CODE
+  0x00000000004022e0 1808     .plt                 CODE
+  0x00000000004029f0 8        .plt.got             CODE
+  0x0000000000402a00 70233    .text                CODE
+  0x0000000000413c5c 9        .fini                CODE
+  0x0000000000413c80 26996    .rodata              DATA
+  0x000000000041a5f4 2052     .eh_frame_hdr        DATA
+  0x000000000041adf8 11372    .eh_frame            DATA
+  0x000000000061de00 8        .init_array          DATA
+  0x000000000061de08 8        .fini_array          DATA
+  0x000000000061de10 8        .jcr                 DATA
+  0x000000000061de18 480      .dynamic             DATA
+  0x000000000061dff8 8        .got                 DATA
+  0x000000000061e000 920      .got.plt             DATA
+  0x000000000061e3a0 608      .data                DATA
 
 symbol table:
   Name                                     Addr               Type
-  deregister_tm_clones                     0x0000000000001090 FUNC
-  register_tm_clones                       0x00000000000010c0 FUNC
-  __do_global_dtors_aux                    0x0000000000001100 FUNC
-  completed.0                              0x000000000000403c DATA
-  __do_global_dtors_aux_fini_array_entry   0x0000000000003df0 DATA
-  frame_dummy                              0x0000000000001140 FUNC
-  __frame_dummy_init_array_entry           0x0000000000003de8 DATA
-  __FRAME_END__                            0x000000000000216c DATA
-  _DYNAMIC                                 0x0000000000003df8 DATA
-  _GLOBAL_OFFSET_TABLE_                    0x0000000000004000 DATA
-  _init                                    0x0000000000001000 FUNC
-  __libc_csu_fini                          0x0000000000001210 FUNC
-  putchar@GLIBC_2.2.5                      0x0000000000000000 FUNC
-  puts@GLIBC_2.2.5                         0x0000000000000000 FUNC
-  _fini                                    0x0000000000001214 FUNC
-  global_var                               0x0000000000004038 DATA
-  __libc_start_main@GLIBC_2.2.5            0x0000000000000000 FUNC
-  __dso_handle                             0x0000000000004030 DATA
-  _IO_stdin_used                           0x0000000000002000 DATA
-  __libc_csu_init                          0x00000000000011b0 FUNC
-  _start                                   0x0000000000001060 FUNC
-  main                                     0x0000000000001145 FUNC
-  __TMC_END__                              0x0000000000004040 DATA
-  __cxa_finalize@GLIBC_2.2.5               0x0000000000000000 FUNC
-  putchar                                  0x0000000000000000 FUNC
-  puts                                     0x0000000000000000 FUNC
+  __ctype_toupper_loc                      0x0000000000000000 FUNC
+  __uflow                                  0x0000000000000000 FUNC
+  getenv                                   0x0000000000000000 FUNC
+  sigprocmask                              0x0000000000000000 FUNC
+  raise                                    0x0000000000000000 FUNC
+  localtime                                0x0000000000000000 FUNC
+  __mempcpy_chk                            0x0000000000000000 FUNC
+  abort                                    0x0000000000000000 FUNC
+  __errno_location                         0x0000000000000000 FUNC
+  strncmp                                  0x0000000000000000 FUNC
+  _exit                                    0x0000000000000000 FUNC
+  strcpy                                   0x0000000000000000 FUNC
+  __fpending                               0x0000000000000000 FUNC
+  isatty                                   0x0000000000000000 FUNC
+  sigaction                                0x0000000000000000 FUNC
+  iswcntrl                                 0x0000000000000000 FUNC
+  wcswidth                                 0x0000000000000000 FUNC
+  localeconv                               0x0000000000000000 FUNC
+  mbstowcs                                 0x0000000000000000 FUNC
+  readlink                                 0x0000000000000000 FUNC
+  clock_gettime                            0x0000000000000000 FUNC
+  setenv                                   0x0000000000000000 FUNC
+  textdomain                               0x0000000000000000 FUNC
+  fclose                                   0x0000000000000000 FUNC
+  opendir                                  0x0000000000000000 FUNC
+  getpwuid                                 0x0000000000000000 FUNC
+  bindtextdomain                           0x0000000000000000 FUNC
+  stpcpy                                   0x0000000000000000 FUNC
+  dcgettext                                0x0000000000000000 FUNC
+  __ctype_get_mb_cur_max                   0x0000000000000000 FUNC
+  strlen                                   0x0000000000000000 FUNC
+  __lxstat                                 0x0000000000000000 FUNC
+  __stack_chk_fail                         0x0000000000000000 FUNC
+  getopt_long                              0x0000000000000000 FUNC
+  mbrtowc                                  0x0000000000000000 FUNC
+  strchr                                   0x0000000000000000 FUNC
+  getgrgid                                 0x0000000000000000 FUNC
+  __overflow                               0x0000000000000000 FUNC
+  strrchr                                  0x0000000000000000 FUNC
+  fgetfilecon                              0x0000000000000000 FUNC
+  gmtime_r                                 0x0000000000000000 FUNC
+  lseek                                    0x0000000000000000 FUNC
+  gettimeofday                             0x0000000000000000 FUNC
+  __assert_fail                            0x0000000000000000 FUNC
+  __strtoul_internal                       0x0000000000000000 FUNC
+  fnmatch                                  0x0000000000000000 FUNC
+  memset                                   0x0000000000000000 FUNC
+  fscanf                                   0x0000000000000000 FUNC
+  ioctl                                    0x0000000000000000 FUNC
+  close                                    0x0000000000000000 FUNC
+  closedir                                 0x0000000000000000 FUNC
   __libc_start_main                        0x0000000000000000 FUNC
-  __cxa_finalize                           0x0000000000000000 FUNC
+  memcmp                                   0x0000000000000000 FUNC
+  _setjmp                                  0x0000000000000000 FUNC
+  fputs_unlocked                           0x0000000000000000 FUNC
+  calloc                                   0x0000000000000000 FUNC
+  lgetfilecon                              0x0000000000000000 FUNC
+  strcmp                                   0x0000000000000000 FUNC
+  signal                                   0x0000000000000000 FUNC
+  dirfd                                    0x0000000000000000 FUNC
+  getpwnam                                 0x0000000000000000 FUNC
+  __memcpy_chk                             0x0000000000000000 FUNC
+  sigemptyset                              0x0000000000000000 FUNC
+  memcpy                                   0x0000000000000000 FUNC
+  getgrnam                                 0x0000000000000000 FUNC
+  getfilecon                               0x0000000000000000 FUNC
+  tzset                                    0x0000000000000000 FUNC
+  fileno                                   0x0000000000000000 FUNC
+  tcgetpgrp                                0x0000000000000000 FUNC
+  __xstat                                  0x0000000000000000 FUNC
+  readdir                                  0x0000000000000000 FUNC
+  wcwidth                                  0x0000000000000000 FUNC
+  fflush                                   0x0000000000000000 FUNC
+  nl_langinfo                              0x0000000000000000 FUNC
+  ungetc                                   0x0000000000000000 FUNC
+  __fxstat                                 0x0000000000000000 FUNC
+  strcoll                                  0x0000000000000000 FUNC
+  __freading                               0x0000000000000000 FUNC
+  fwrite_unlocked                          0x0000000000000000 FUNC
+  realloc                                  0x0000000000000000 FUNC
+  stpncpy                                  0x0000000000000000 FUNC
+  fdopen                                   0x0000000000000000 FUNC
+  setlocale                                0x0000000000000000 FUNC
+  __printf_chk                             0x0000000000000000 FUNC
+  timegm                                   0x0000000000000000 FUNC
+  strftime                                 0x0000000000000000 FUNC
+  mempcpy                                  0x0000000000000000 FUNC
+  memmove                                  0x0000000000000000 FUNC
+  error                                    0x0000000000000000 FUNC
+  open                                     0x0000000000000000 FUNC
+  fseeko                                   0x0000000000000000 FUNC
+  unsetenv                                 0x0000000000000000 FUNC
+  strtoul                                  0x0000000000000000 FUNC
+  __cxa_atexit                             0x0000000000000000 FUNC
+  wcstombs                                 0x0000000000000000 FUNC
+  getxattr                                 0x0000000000000000 FUNC
+  freecon                                  0x0000000000000000 FUNC
+  sigismember                              0x0000000000000000 FUNC
+  exit                                     0x0000000000000000 FUNC
+  fwrite                                   0x0000000000000000 FUNC
+  __fprintf_chk                            0x0000000000000000 FUNC
+  fflush_unlocked                          0x0000000000000000 FUNC
+  mbsinit                                  0x0000000000000000 FUNC
+  iswprint                                 0x0000000000000000 FUNC
+  sigaddset                                0x0000000000000000 FUNC
+  strstr                                   0x0000000000000000 FUNC
+  __ctype_tolower_loc                      0x0000000000000000 FUNC
+  __ctype_b_loc                            0x0000000000000000 FUNC
+  __sprintf_chk                            0x0000000000000000 FUNC
+  __progname                               0x000000000061e600 DATA
+  _fini                                    0x0000000000413c5c FUNC
+  optind                                   0x000000000061e610 DATA
+  _init                                    0x00000000004022b8 FUNC
+  free                                     0x0000000000402340 FUNC
+  program_invocation_name                  0x000000000061e620 DATA
+  __progname_full                          0x000000000061e620 DATA
+  _obstack_memory_used                     0x0000000000412930 FUNC
+  obstack_alloc_failed_handler             0x000000000061e5f8 DATA
+  _obstack_begin                           0x0000000000412750 FUNC
+  stderr                                   0x000000000061e640 DATA
+  _obstack_free                            0x00000000004128c0 FUNC
+  program_invocation_short_name            0x000000000061e600 DATA
+  localtime_r                              0x00000000004023a0 FUNC
+  _obstack_allocated_p                     0x0000000000412890 FUNC
+  optarg                                   0x000000000061e618 DATA
+  _obstack_begin_1                         0x0000000000412770 FUNC
+  _obstack_newchunk                        0x0000000000412790 FUNC
+  malloc                                   0x0000000000402790 FUNC
+  stdout                                   0x000000000061e608 DATA
 
-.rodata(40bytes):
-  0x0000000000002000: 0100 0200 0000 0000 7468 6572 6520 6172 ........there.ar
-  0x0000000000002010: 6520 736f 6d65 2074 6578 7420 666f 7220 e.some.text.for.
-  0x0000000000002020: 7465 7374 696e 6700                     testing.
+.rodata(26996bytes):
+  0x0000000000413c80: 0100 0200 0000 0000 0000 0000 0000 0000 ................
+  0x0000000000413c90: 0000 0000 0000 0000 0000 0000 0000 0000 ................
+  ...
+  0x0000000000416ab0: 0000 0000 0000 0000 4c69 7374 2069 6e66 ........List.inf
+  0x0000000000416ac0: 6f72 6d61 7469 6f6e 2061 626f 7574 2074 ormation.about.t
+  0x0000000000416ad0: 6865 2046 494c 4573 2028 7468 6520 6375 he.FILEs.(the.cu
+  0x0000000000416ae0: 7272 656e 7420 6469 7265 6374 6f72 7920 rrent.directory.
+  0x0000000000416af0: 6279 2064 6566 6175 6c74 292e 0a53 6f72 by.default)..Sor
+  0x0000000000416b00: 7420 656e 7472 6965 7320 616c 7068 6162 t.entries.alphab
+  0x0000000000416b10: 6574 6963 616c 6c79 2069 6620 6e6f 6e65 etically.if.none
+  0x0000000000416b20: 206f 6620 2d63 6674 7576 5355 5820 6e6f .of.-cftuvSUX.no
+  0x0000000000416b30: 7220 2d2d 736f 7274 2069 7320 7370 6563 r.--sort.is.spec
+  0x0000000000416b40: 6966 6965 642e 0a00 0a4d 616e 6461 746f ified....Mandato
+  0x0000000000416b50: 7279 2061 7267 756d 656e 7473 2074 6f20 ry.arguments.to.
+  0x0000000000416b60: 6c6f 6e67 206f 7074 696f 6e73 2061 7265 long.options.are
+  0x0000000000416b70: 206d 616e 6461 746f 7279 2066 6f72 2073 .mandatory.for.s
+  0x0000000000416b80: 686f 7274 206f 7074 696f 6e73 2074 6f6f hort.options.too
+  0x0000000000416b90: 2e0a 0000 0000 0000 2020 2d61 2c20 2d2d ..........-a,.--
+  0x0000000000416ba0: 616c 6c20 2020 2020 2020 2020 2020 2020 all.............
 ```
 
 
@@ -4210,6 +4333,970 @@ adc byte ptr [rax - 0x7d], cl; ret                                              
 
 
 
+## 9. 二进制插桩
+
+### 9.1 二进制插桩简介
+
+**二进制插桩**是指在现有二进制程序中的任意位置插入新代码，并以某种方式来观察和修改二进制程序的行为。添加新代码的位置称为**插桩点**，添加的代码则称为**插桩代码**。
+
+二进制插桩分为**静态二进制插桩(SBI, Static Binary Instrumentation)**和**动态二进制插桩(DBI, Dynamic Binary Instrumentation)**。
+
+
+
+### 9.2 静态二进制插桩 & 动态二进制插桩
+
+| 动态二进制插桩                         | 静态二进制插桩                     |
+| -------------------------------------- | ---------------------------------- |
+| :x:相对较慢                            | :white_check_mark:相对较快         |
+| :x:依赖DBI库和工具                     | :white_check_mark:独立的二进制程序 |
+| :white_check_mark:不需要指定要插桩的库 | :x:需要明确指定要插桩的库          |
+| :white_check_mark:可处理动态生成的代码 | :x:不支持动态生成的代码            |
+| :white_check_mark:可动态附加和分离     | :x:对整个执行过程插桩              |
+| :white_check_mark:不需要反汇编         | :x:对整个执行过程插桩              |
+| :white_check_mark:不需要修改二进制程序 | :x:需要重写二进制程序且容易出错    |
+| :white_check_mark:不需要符号信息       | :x:需要符号信息来减少错误          |
+
+
+
+### 9.3 静态二进制插桩
+
+SBI对二进制程序进行反汇编，然后按需添加插桩代码并将更新的二进制程序存入磁盘。
+
+SBI的**难点**在于：在不破坏任何现有代码和数据引用的前提下，添加插桩代码病重写二进制程序。
+
+目前有两种解决方法：**int 3**方法和**跳板**方法。
+
+
+
+### 9.3.1 int 3 方法
+
+int 3方法来自x86架构的int 3指令，用于实现软件断点。
+
+因为不可能修复所有对重定位代码的引用，SBI不能将插桩代码内联存储在现有代码段中。因为现有代码段没有存放任意数量的新代码 的空间，所以SBI方法必须将插桩代码存储在一个独立的位置，如一个 新的代码段或共享库，然后当程序执行到插桩点时，程序以某种方式将控制流转移到插桩代码。
+
+**一种使用jmp来hook插桩点的非通用SBI实现方法**：
+
+![一种使用jmp来hook插桩点的非通用SBI实现方法](assets/Practical-Binary-Analysis/image-20220817234838661.png)
+
+当对短指令插桩时，指向插桩代码的jmp指令可能比它替换的指令长。int 3指令可以用来对不适用于多字节跳转的简短指令进行插桩。
+
+在x86架构中，int 3指令会生成一个软中断，用户空间的程序 能够通过操作系统提供的**SIGTRAP**信号捕获该中断。int 3的关键在于它的**长度只有1字节**，所 以你可以用它覆盖任何指令，而不必担心覆盖相邻的指令。int 3的**操作码是0xcc**。
+
+从SBI的角度来看，使用int 3对指令进行插桩，只需用0xcc覆盖该指令的第一字节。当SIGTRAP信号产生时，可以使用Linux操作系统的**ptrace API找出中断发生的地址**，从而获取插桩点地址。然后 根据插桩点位置调用相应的插桩代码。
+
+**缺点**：像int 3这样的软中断速度很慢，导致插桩后的应用程序的运行开销过大。此外，int 3方法与正 在将int 3作为断点进行调试的程序不兼容。
+
+
+
+### 9.3.2 跳板方法
+
+它创建一个原始代码的副本并只对这个副本进行插 桩。该方法不会破坏任何代码或数据引用，因为其仍然指向原始的、 未更改的位置。为了确保二进制程序运行插桩代码而不是原始代码， 跳板方法使用jmp指令，即跳转指令，将原始代码重定向到插桩后的 副本。每当有调用或跳转指令将控制流转移到原始代码中时，该位置 的跳板将立即跳转到相应的插桩代码。
+
+**使用跳板方法的SBI**：
+
+![使用跳板方法的SBI](assets/Practical-Binary-Analysis/image-20220817235742505.png)
+
+由于新插入的指令会导致代码移位，为了保持相对跳转的正确性，SBI引擎会**修补所有相对jmp指令的偏移**。此外，SBI引擎会替换所有具有8位偏移的2字节长度的相对jmp指令，取而代之的是具有32 位偏移的、5字节长度的指令，这是因为f1_copy中的代码移位可能会导致jmp指令与其目标之间的偏移变大以至于无法以8位进行编码。 类似地，SBI引擎会**重写直接调用**，如调用f2函数，使它们指向已插桩的函数而不是原始函数。为了**兼容间接调用**，需要在每个**原始函数的开头还需要跳板**。
+
+由于间接控制流转移指令以动态计算的地址为目标，因此SBI引擎无法以静态方式重定向。跳板方法使得间接控制流转移指令把控制流转移到原始的未插桩的代码，使用放置在原始代码中的**跳板拦截控制流并将其重定向回插桩后的代码**。
+
+**SBI程序中的间接控制转移**：
+
+![ SBI程序中的间接控制转移](assets/Practical-Binary-Analysis/image-20220818001705069.png)
+
+基于跳板方法的SBI引擎需要对位置无关的可执行文件（PIE二进 制程序）中的间接控制流转移提供特殊支持，这类可执行文件不依赖于任何特定的加载地址。PIE二进制程序读取程序计数器的值并将其作为地址计算的基础。在32位的x86架构上，PIE二进制程序通过执行 call指令，然后读取栈中的返回地址的方法来获得程序计数器的值。
+
+```assembly
+<__x86.get_pc_thunk.bx>:
+ mov ebx,DWORD PTR [esp]
+ ret
+```
+
+此函数将返回地址复制到ebx，然后返回。在x64架构上，直接读取程序计数器（rip）。
+
+PIE二进制程序带来的风险在于其可能在运行插桩代码时读取程序计数器的值并用于地址计算，因为插桩代码的布局与地址计算假定的原始布局不同，这可能会产生不正确的结果。为了解决这个问题，SBI 引擎对读取程序计数器的代码进行插桩，使其返回程序计数器在原始 代码环境中的值。这样，随后的地址计算就像在未插桩的二进制程序中一样生成原始代码地址，使得SBI引擎能够用跳板来拦截控制流。
+
+默认情况下，存储在跳转表中的地址都指向原始代码。因此，间接jmp指令跳转到没有跳板的原始函数中间，并且在那里继续执行。为了避免此问题，SBI引擎必须修改跳转表，将原始代码地址更改为新的地址；或者在原始代码中的每个switch分支下放置一个跳板。遗憾的是，基本的符号信息（与丰富的DWARF信息不同）不包含有关switch语句布局的信息，因此跳板的放置位置很难确定。此外，switch语句之间可能没有足够的空间来容纳所有跳板，而且修补跳转表也有很大风险，可能会错误地更改恰好是有效地址但实际上不属于跳转表的数据。
+
+
+
+### 9.4 动态二进制插桩
+
+由于DBI引擎在执行和插桩指令流时监视二进制程序，因此不需要像SBI那样进行反汇编或二进制重写，也就不易出错。
+
+DBI引擎通过监视和控制所有执行的指令来**动态地插桩进程**。DBI 引擎公开了API接口，允许用户编写自定义的DBI工具（通常是以引擎加载的共享库的形式），指定应该插桩哪些代码以及如何插桩。
+
+DBI引擎不直接运行应用程序进程，而是**在代码缓存（code cache）中运行**。最初代码缓存是空的，DBI引擎从进程中提取一段 代码并按照DBI工具的指示对代码进行插桩。
+
+**DBI系统的架构：**
+
+![ DBI系统的架构](assets/Practical-Binary-Analysis/image-20220818002833586.png)
+
+在插桩后，DBI引擎用JIT编译器编译代码，该编译器将重新优化插桩代码，并将编译后的代码存储在代码缓存中。JIT 编译器还会重写控制流指令，以确保DBI引擎对进程的控制，防止控制流转移到未插桩应用程序进程中继续执行。请注意，DBI引擎中的JIT编译器与大多编译器不同，它不会将代码转换成不同的语言，只会将机器码编译成机器码。代码只需要在第一次执行时被插桩和JIT编译，此后代码会被存储在代码缓存中并被重用。虽然大多数指令在代码缓存中直接运行，但对于某些指令，DBI引擎可能会模拟而不是直接运行它们。如Pin就是这样处理诸如execve之类需进行特殊处理的系统调用的。
+
+
+
+#### 9.4.1 Pin简介
+
+作为最流行的DBI平台之一，Intel Pin是一个频繁更新、免费使用（尽管不开放源代码）且有详细文档的平台，提供了相对容易使用的API套件。Pin目前支持x86和x64的Intel CPU架构，可用于Linux、Windows 及macOS等操作系统。
+
+Pin读取和实时编译代码的粒度为**踪迹（trace）**。踪迹是一种类似基本块的抽象方式，与常规的基本块不同，其只能在顶部进入，但可能包含多个出口。Pin定义踪迹为直线指令序列，该序列在遇到无条件控制流转移、达到预定义的最大长度或最大条件控制流指令数时结束。虽然Pin总是以踪迹粒度实时编译代码，但它支持在多种粒度上插桩代码，包括指令、基本块、踪迹、函数及映像（一个完整的可执行程序或库）。Pin 的DBI引擎和Pintool都运行于用户空间，因此**只能插桩用户空间进程**。
+
+实现一个 Pintool 需要两种不同的函数：**插桩例程**和**分析例程**。插桩例程告诉Pin 要添加的插装代码和位置，这些函数只在 Pin 第一 次遇到未插桩的代码时才运行。插桩例程安装指向分析例程的回调，其中分析例程包含了实际的插桩代码，并且在每次插桩代码序列执行时被调用。
+
+
+
+#### 9.4.2 Pin下载安装
+
+从官网下载Pin的压缩包：[Pin - A Binary Instrumentation Tool - Downloads (intel.com)](https://www.intel.com/content/www/us/en/developer/articles/tool/pin-a-binary-instrumentation-tool-downloads.html)
+
+解压Pin：`tar xzf pin-3.24-98612-g6bd5931f2-gcc-linux.tar.gz`
+
+
+
+### 9.5 使用Pin分析
+
+**注意：**`INS_IsBranchOrCall`被弃用了，应该使用`INS_IsValidForIpointTakenBranch`检查。
+
+`profiler.cpp`
+
+```c
+#include <stdio.h>
+#include <map>
+#include <string>
+#include <asm-generic/unistd.h>
+
+#include "pin.H"
+
+KNOB<bool> ProfileCalls(KNOB_MODE_WRITEONCE, "pintool", "c", "0", "Profile function calls");
+KNOB<bool> ProfileSyscalls(KNOB_MODE_WRITEONCE, "pintool", "s", "0", "Profile syscalls");
+
+std::map<ADDRINT, std::map<ADDRINT, unsigned long> > cflows;
+std::map<ADDRINT, std::map<ADDRINT, unsigned long> > calls;
+std::map<ADDRINT, unsigned long> syscalls;
+std::map<ADDRINT, std::string> funcnames;
+
+unsigned long insn_count    = 0;
+unsigned long cflow_count   = 0;
+unsigned long call_count    = 0;
+unsigned long syscall_count = 0;
+
+
+/*****************************************************************************
+ *                             Analysis functions                            *
+ *****************************************************************************/
+static void
+count_bb_insns(UINT32 n)
+{
+  insn_count += n;
+}
+
+
+static void
+count_cflow(ADDRINT ip, ADDRINT target)
+{
+  cflows[target][ip]++;
+  cflow_count++;
+}
+
+
+static void
+count_call(ADDRINT ip, ADDRINT target)
+{
+  calls[target][ip]++;
+  call_count++;
+}
+
+
+static void
+log_syscall(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v)
+{
+  syscalls[PIN_GetSyscallNumber(ctxt, std)]++;
+  syscall_count++;
+}
+
+
+/*****************************************************************************
+ *                         Instrumentation functions                         *
+ *****************************************************************************/
+static void
+instrument_bb(BBL bb)
+{
+  BBL_InsertCall(
+    bb, IPOINT_ANYWHERE, (AFUNPTR)count_bb_insns,
+    IARG_UINT32, BBL_NumIns(bb),
+    IARG_END
+  );
+}
+
+
+static void
+instrument_trace(TRACE trace, void *v)
+{
+  IMG img = IMG_FindByAddress(TRACE_Address(trace));
+  if(!IMG_Valid(img) || !IMG_IsMainExecutable(img)) return;
+
+  for(BBL bb = TRACE_BblHead(trace); BBL_Valid(bb); bb = BBL_Next(bb)) {
+    instrument_bb(bb);
+  }
+}
+
+
+static void
+instrument_insn(INS ins, void *v)
+{
+  if(!INS_IsValidForIpointTakenBranch(ins)) return;
+
+  IMG img = IMG_FindByAddress(INS_Address(ins));
+  if(!IMG_Valid(img) || !IMG_IsMainExecutable(img)) return;
+
+  INS_InsertPredicatedCall(
+    ins, IPOINT_TAKEN_BRANCH, (AFUNPTR)count_cflow, 
+    IARG_INST_PTR, IARG_BRANCH_TARGET_ADDR,
+    IARG_END
+  );
+
+  if(INS_HasFallThrough(ins)) {
+    INS_InsertPredicatedCall(
+      ins, IPOINT_AFTER, (AFUNPTR)count_cflow, 
+      IARG_INST_PTR, IARG_FALLTHROUGH_ADDR, 
+      IARG_END
+    );
+  }
+  
+  if(INS_IsCall(ins)) {
+    if(ProfileCalls.Value()) {
+      INS_InsertCall(
+        ins, IPOINT_BEFORE, (AFUNPTR)count_call, 
+        IARG_INST_PTR, IARG_BRANCH_TARGET_ADDR,  
+        IARG_END
+      );
+    }
+  }
+}
+
+
+static void
+parse_funcsyms(IMG img, void *v)
+{
+  if(!IMG_Valid(img)) return;
+
+  for(SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
+    for(RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn)) {
+      funcnames[RTN_Address(rtn)] = RTN_Name(rtn);
+    }
+  }
+}
+
+
+/*****************************************************************************
+ *                               Other functions                             *
+ *****************************************************************************/
+static void
+print_results(INT32 code, void *v)
+{
+  ADDRINT ip, target;
+  unsigned long count;
+  std::map<ADDRINT, std::map<ADDRINT, unsigned long> >::iterator i;
+  std::map<ADDRINT, unsigned long>::iterator j;
+
+  printf("executed %lu instructions\n\n", insn_count);
+
+  printf("******* CONTROL TRANSFERS *******\n");
+  for(i = cflows.begin(); i != cflows.end(); i++) {
+    target = i->first;
+    for(j = i->second.begin(); j != i->second.end(); j++) {
+      ip = j->first;
+      count = j->second;
+      printf("0x%08jx <- 0x%08jx: %3lu (%0.2f%%)\n", 
+             target, ip, count, (double)count/cflow_count*100.0);
+    } 
+  }
+
+  if(!calls.empty()) {
+    printf("\n******* FUNCTION CALLS *******\n");
+    for(i = calls.begin(); i != calls.end(); i++) {
+      target = i->first;
+
+      for(j = i->second.begin(); j != i->second.end(); j++) {
+        ip = j->first;
+        count = j->second;
+        printf("[%-30s] 0x%08jx <- 0x%08jx: %3lu (%0.2f%%)\n", 
+               funcnames[target].c_str(), target, ip, count, (double)count/call_count*100.0);
+      } 
+    }
+  }
+
+  if(!syscalls.empty()) {
+    printf("\n******* SYSCALLS *******\n");
+    for(j = syscalls.begin(); j != syscalls.end(); j++) {
+      count = j->second;
+      printf("%3ju: %3lu (%0.2f%%)\n", j->first, count, (double)count/syscall_count*100.0);
+    }
+  }
+}
+
+
+static void
+print_usage()
+{
+  std::string help = KNOB_BASE::StringKnobSummary();
+
+  fprintf(stderr, "\nProfile call and jump targets\n");
+  fprintf(stderr, "%s\n", help.c_str());
+}
+
+
+int
+main(int argc, char *argv[])
+{
+  PIN_InitSymbols();
+  if(PIN_Init(argc,argv)) {
+    print_usage();
+    return 1;
+  }
+
+  IMG_AddInstrumentFunction(parse_funcsyms, NULL);
+  INS_AddInstrumentFunction(instrument_insn, NULL);
+  TRACE_AddInstrumentFunction(instrument_trace, NULL);
+  if(ProfileSyscalls.Value()) {
+    PIN_AddSyscallEntryFunction(log_syscall, NULL);
+  }
+  PIN_AddFiniFunction(print_results, NULL);
+
+  /* Never returns */
+  PIN_StartProgram();
+    
+  return 0;
+}
+```
+
+使用Profiler测试/bin/true。
+
+pin的命令格式：`pin -t <pintool的路径> [由程序中KNOB类型设置的option] -- <启动被插桩分析的程序的命令行指令>`
+
+```bash
+$ pin -t ./obj-intel64/profiler.so -c -s -- /bin/true
+executed 95 instructions
+
+******* CONTROL TRANSFERS *******
+0x00401000 <- 0x00403f7c:   1 (4.35%)
+0x00401015 <- 0x0040100e:   1 (4.35%)
+0x00401020 <- 0x0040118b:   1 (4.35%)
+0x00401180 <- 0x004013f4:   1 (4.35%)
+0x00401186 <- 0x00401180:   1 (4.35%)
+0x00401335 <- 0x00401333:   1 (4.35%)
+0x00401400 <- 0x0040148d:   1 (4.35%)
+0x00401430 <- 0x00401413:   1 (4.35%)
+0x00401440 <- 0x004014ab:   1 (4.35%)
+0x00401478 <- 0x00401461:   1 (4.35%)
+0x00401489 <- 0x00401487:   1 (4.35%)
+0x00401492 <- 0x00401431:   1 (4.35%)
+0x004014a0 <- 0x00403f99:   1 (4.35%)
+0x004014ab <- 0x004014a9:   1 (4.35%)
+0x00403f81 <- 0x00401019:   1 (4.35%)
+0x00403f86 <- 0x00403f84:   1 (4.35%)
+0x00403f9d <- 0x00401479:   1 (4.35%)
+0x00403fa6 <- 0x00403fa4:   1 (4.35%)
+0x7fd6e47ac7cf <- 0x00403fb4:   1 (4.35%)
+0x7fd6e47ac840 <- 0x00401337:   1 (4.35%)
+0x7fd6f80f5e27 <- 0x0040149a:   1 (4.35%)
+0x7fd6f80f5e45 <- 0x00404004:   1 (4.35%)
+0x7fd6f80fcf10 <- 0x00401026:   1 (4.35%)
+
+******* FUNCTION CALLS *******
+[_init                         ] 0x00401000 <- 0x00403f7c:   1 (25.00%)
+[__libc_start_main@plt         ] 0x00401180 <- 0x004013f4:   1 (25.00%)
+[                              ] 0x00401400 <- 0x0040148d:   1 (25.00%)
+[                              ] 0x004014a0 <- 0x00403f99:   1 (25.00%)
+
+******* SYSCALLS *******
+  0:   1 (4.00%)
+  2:   2 (8.00%)
+  3:   2 (8.00%)
+  5:   2 (8.00%)
+  9:   7 (28.00%)
+ 10:   4 (16.00%)
+ 11:   1 (4.00%)
+ 12:   1 (4.00%)
+ 21:   3 (12.00%)
+158:   1 (4.00%)
+231:   1 (4.00%)
+```
+
+使用Profiler附加到运行中的netcat进程。
+
+```bash
+$  echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+$ nc -l -u 127.0.0.1 9999 &
+[1] 8837
+$ pin -pid 8837 -t ./obj-intel64/profiler.so -c -s
+$  echo "Testing the profiler" | nc -u 127.0.0.1 9999
+Testing the profiler
+^C
+$ fg
+nc -l -u 127.0.0.1 9999
+^C
+executed 164 instructions
+
+******* CONTROL TRANSFERS *******
+0x00401380 <- 0x0040140b:   1 (2.04%)
+0x00401380 <- 0x0040144b:   1 (2.04%)
+0x00401380 <- 0x004014db:   1 (2.04%)
+0x00401380 <- 0x004015eb:   1 (2.04%)
+0x00401380 <- 0x004016ab:   1 (2.04%)
+0x00401400 <- 0x00402dc7:   1 (2.04%)
+0x00401406 <- 0x00401400:   1 (2.04%)
+0x00401440 <- 0x00403c06:   1 (2.04%)
+0x00401446 <- 0x00401440:   1 (2.04%)
+0x004014d0 <- 0x00402eba:   2 (4.08%)
+0x004014d6 <- 0x004014d0:   1 (2.04%)
+0x004015e0 <- 0x00402d62:   1 (2.04%)
+0x004015e0 <- 0x00402d71:   1 (2.04%)
+0x004015e6 <- 0x004015e0:   1 (2.04%)
+0x004016a0 <- 0x00401e80:   1 (2.04%)
+0x004016a6 <- 0x004016a0:   1 (2.04%)
+0x00401e73 <- 0x00401e6d:   1 (2.04%)
+0x00401e8d <- 0x00401e87:   1 (2.04%)
+0x00402d30 <- 0x00401e90:   1 (2.04%)
+0x00402db8 <- 0x00402ed6:   1 (2.04%)
+0x00402dd5 <- 0x00402dcf:   1 (2.04%)
+0x00402ddb <- 0x00402dd5:   1 (2.04%)
+0x00402de9 <- 0x00402de3:   1 (2.04%)
+0x00402e01 <- 0x00403c3e:   1 (2.04%)
+0x00402e0a <- 0x00402e04:   1 (2.04%)
+0x00402e14 <- 0x00402e12:   1 (2.04%)
+0x00402e88 <- 0x00402f12:   1 (2.04%)
+0x00402e8c <- 0x00402dad:   1 (2.04%)
+0x00402e95 <- 0x00402e8f:   2 (4.08%)
+0x00402e9f <- 0x00402e9d:   2 (4.08%)
+0x00402ec8 <- 0x00402ec2:   1 (2.04%)
+0x00402ece <- 0x00402ec8:   1 (2.04%)
+0x00402f10 <- 0x00402e1b:   1 (2.04%)
+0x00403bb0 <- 0x00402dfc:   1 (2.04%)
+0x00403bf8 <- 0x00403bf6:   1 (2.04%)
+0x00403c0e <- 0x00403c0c:   1 (2.04%)
+0x00403c1e <- 0x00403c68:   1 (2.04%)
+0x00403c60 <- 0x00403c11:   1 (2.04%)
+0x00403c68 <- 0x00403c66:   1 (2.04%)
+0x7f538d625ae0 <- 0x004015e0:   1 (2.04%)
+0x7f538d6c91b0 <- 0x004014d0:   1 (2.04%)
+0x7f538ddc1f10 <- 0x00401386:   5 (10.20%)
+
+******* FUNCTION CALLS *******
+[__read_chk@plt                ] 0x00401400 <- 0x00402dc7:   1 (11.11%)
+[write@plt                     ] 0x00401440 <- 0x00403c06:   1 (11.11%)
+[__poll_chk@plt                ] 0x004014d0 <- 0x00402eba:   2 (22.22%)
+[fileno@plt                    ] 0x004015e0 <- 0x00402d62:   1 (11.11%)
+[fileno@plt                    ] 0x004015e0 <- 0x00402d71:   1 (11.11%)
+[connect@plt                   ] 0x004016a0 <- 0x00401e80:   1 (11.11%)
+[                              ] 0x00402d30 <- 0x00401e90:   1 (11.11%)
+[                              ] 0x00403bb0 <- 0x00402dfc:   1 (11.11%)
+
+******* SYSCALLS *******
+  0:   1 (16.67%)
+  1:   1 (16.67%)
+  7:   2 (33.33%)
+ 42:   1 (16.67%)
+ 45:   1 (16.67%)
+```
+
+
+
+### 9.6 使用Pin脱壳
+
+#### 9.6.1 加壳
+
+可执行文件加壳器（简称加壳器）将二进制文件作为输入并将二进制代码和数据段“打包”到一个压缩或加密的数据区域中，然后生成一个新的、加壳的可执行文件。
+
+**加壳二进制文件的创建过程和加载过程**:
+
+![ 加壳二进制文件的创建过程和加载过程](assets/Practical-Binary-Analysis/image-20220818154500563.png)
+
+当使用加壳器处理二进制文件时，它会生成一个新的二进制文件，其中所有的原始代码和数据都被压缩或加密到加壳区域。此外，加壳器插入一个包含引导代码的新代码段，并将二进制文件的入口点重定向到引导代码。
+
+当加载并执行加壳的二进制文件时，引导代码首先将原始代码和数据提取到内存中，然后把控制权交给二进制文件的原始入口点 （Original Entry Point，OEP），从而恢复程序的正常执行。
+
+
+
+#### 9.6.2 脱壳
+
+许多加壳器会以独有的方式对二进制文件加壳。对于一些流行的加壳器（如UPX和AsPack）来说，有专门的脱壳器可以自动从加壳的二 进制文件中提取和原始二进制文件相似的文件。但是，因为恶意软件的设计者通常会自己设计加壳方式，这些专门的脱壳器常常无法处理 恶意软件中使用的加壳器，所以必须订制自己的脱壳工具手动对这类恶意软件进行脱壳（如使用调试器找到跳转到OEP的位置，然后将代码转储到磁盘）。
+
+脱壳器依赖于加壳器常见的运行模式来检测指向OEP的跳转，然后将包含OEP的内存区域转储到磁盘。当运行加壳的二进制文件时，引导代码会对原始代码进行完全脱壳，并将其写入内存，然后将控制流转移到之前编写的代码中的OEP。当脱壳器检测到控制流转移时，它会将目标内存区域的数据转储到磁盘。
+
+
+
+**注意：**`INS_hasKnownMemorySize`在`pin-3.17`中被移除了。`INS_IsIndirectBranchOrCall`被弃用，应使用`INS_IsIndirectControlFlow`。
+
+`unpacker.cpp`
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <map>
+#include <vector>
+#include <string>
+#include <algorithm>
+
+#include "pin.H"
+
+typedef struct mem_access {
+  mem_access()                                  : w(false), x(false), val(0) {}
+  mem_access(bool ww, bool xx, unsigned char v) : w(ww)   , x(xx)   , val(v) {}
+  bool w;
+  bool x;
+  unsigned char val;
+} mem_access_t;
+
+typedef struct mem_cluster {
+  mem_cluster()                                             : base(0), size(0), w(false), x(false) {}
+  mem_cluster(ADDRINT b, unsigned long s, bool ww, bool xx) : base(b), size(s), w(ww), x(xx)       {}
+  ADDRINT       base;
+  unsigned long size;
+  bool          w;
+  bool          x;
+} mem_cluster_t;
+
+FILE *logfile;
+std::map<ADDRINT, mem_access_t> shadow_mem;
+std::vector<mem_cluster_t> clusters;
+ADDRINT saved_addr;
+
+KNOB<std::string> KnobLogFile(KNOB_MODE_WRITEONCE, "pintool", "l", "unpacker.log", "log file");
+
+
+/*****************************************************************************
+ *                             Analysis functions                            *
+ *****************************************************************************/
+void
+fsize_to_str(unsigned long size, char *buf, unsigned len)
+{
+  int i;
+  double d;
+  const char *units[] = {"B", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
+
+  i = 0;
+  d = (double)size;
+  while(d > 1024) {
+    d /= 1024;
+    i++;
+  }
+
+  if(!strcmp(units[i], "B")) {
+    snprintf(buf, len, "%.0f%s", d, units[i]);
+  } else {
+    snprintf(buf, len, "%.1f%s", d, units[i]);
+  }
+}
+
+
+static void
+mem_to_file(mem_cluster_t *c, ADDRINT entry)
+{
+  FILE *f;
+  char buf[128];
+
+  fsize_to_str(c->size, buf, 128);
+  fprintf(logfile, "extracting unpacked region 0x%016jx (%9s) %s%s entry 0x%016jx\n", 
+          c->base, buf, c->w ? "w" : "-", c->x ? "x" : "-", entry);
+
+  snprintf(buf, sizeof(buf), "unpacked.0x%jx-0x%jx_entry-0x%jx", 
+           c->base, c->base+c->size, entry);
+
+  f = fopen(buf, "wb");
+  if(!f) {
+    fprintf(logfile, "failed to open file '%s' for writing\n", buf);
+  } else {
+    for(ADDRINT i = c->base; i < c->base+c->size; i++) {
+      if(fwrite((const void*)&shadow_mem[i].val, 1, 1, f) != 1) {
+        fprintf(logfile, "failed to write unpacked byte 0x%jx to file '%s'\n", i, buf);
+      }
+    }
+    fclose(f);
+  }
+}
+
+
+static void
+set_cluster(ADDRINT target, mem_cluster_t *c)
+{
+  ADDRINT addr, base;
+  unsigned long size;
+  bool w, x;
+  std::map<ADDRINT, mem_access_t>::iterator i, j;
+
+  j = shadow_mem.find(target);
+  assert(j != shadow_mem.end());
+
+  /* scan back to base of cluster */
+  base = target;
+  w    = false;
+  x    = false;
+  for(i = j; ; i--) {
+    addr = i->first;
+    if(addr == base) {
+      /* this address is one less than the previous one, so this is still the
+       * same cluster */
+      if(i->second.w) w = true;
+      if(i->second.x) x = true;
+      base--;
+    } else {
+      /* we've reached the start of the cluster but overshot it by one byte */
+      base++;
+      break;
+    }
+    if(i == shadow_mem.begin()) {
+      base++;
+      break;
+    }
+  }
+
+  /* scan forward to end of cluster */
+  size = target-base;
+  for(i = j; i != shadow_mem.end(); i++) {
+    addr = i->first;
+    if(addr == base+size) {
+      if(i->second.w) w = true;
+      if(i->second.x) x = true;
+      size++;
+    } else {
+      break;
+    }
+  }
+
+  c->base = base;
+  c->size = size;
+  c->w    = w;
+  c->x    = x;
+}
+
+
+static bool
+in_cluster(ADDRINT target)
+{
+  mem_cluster_t *c;
+
+  for(unsigned i = 0; i < clusters.size(); i++) {
+    c = &clusters[i];
+    if(c->base <= target && target < c->base+c->size) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
+static void
+check_indirect_ctransfer(ADDRINT ip, ADDRINT target)
+{
+  mem_cluster_t c;
+
+  shadow_mem[target].x = true;
+  if(shadow_mem[target].w && !in_cluster(target)) {
+    /* control transfer to a once-writable memory region, suspected transfer
+     * to original entry point of an unpacked binary */
+    set_cluster(target, &c);
+    clusters.push_back(c);
+    /* dump the new cluster containing the unpacked region to file */
+    mem_to_file(&c, target);
+    /* we don't stop here because there might be multiple unpacking stages */
+  }
+}
+
+
+static void
+queue_memwrite(ADDRINT addr)
+{
+  saved_addr = addr;
+}
+
+
+static void
+log_memwrite(UINT32 size)
+{
+  ADDRINT addr = saved_addr;
+  for(ADDRINT i = addr; i < addr+size; i++) {
+    shadow_mem[i].w = true;
+    PIN_SafeCopy(&shadow_mem[i].val, (const void*)i, 1);
+  }
+}
+
+
+/*****************************************************************************
+ *                         Instrumentation functions                         *
+ *****************************************************************************/
+static void
+instrument_mem_cflow(INS ins, void *v)
+{
+  if(INS_IsMemoryWrite(ins)) {
+    for (UINT32 memOpIdx = 0; memOpIdx < INS_MemoryOperandCount(ins); memOpIdx++) {
+        if(INS_MemoryOperandIsWritten(ins, memOpIdx))
+            INS_InsertPredicatedCall(
+                ins, IPOINT_BEFORE, (AFUNPTR)queue_memwrite, 
+                IARG_MEMORYWRITE_EA,
+                IARG_END
+        );
+    }
+    if(INS_HasFallThrough(ins)) {
+      INS_InsertPredicatedCall(
+        ins, IPOINT_AFTER, (AFUNPTR)log_memwrite, 
+        IARG_MEMORYWRITE_SIZE, 
+        IARG_END
+      );
+    }
+    if(INS_IsValidForIpointTakenBranch(ins)) {
+      INS_InsertPredicatedCall(
+        ins, IPOINT_TAKEN_BRANCH, (AFUNPTR)log_memwrite, 
+        IARG_MEMORYWRITE_SIZE,
+        IARG_END
+      );
+    }
+  }
+  if(INS_IsIndirectControlFlow(ins) && INS_OperandCount(ins) > 0) {
+    INS_InsertCall(
+      ins, IPOINT_BEFORE, (AFUNPTR)check_indirect_ctransfer, 
+      IARG_INST_PTR, IARG_BRANCH_TARGET_ADDR,  
+      IARG_END
+    );
+  }
+}
+
+
+/*****************************************************************************
+ *                               Other functions                             *
+ *****************************************************************************/
+static bool
+cmp_cluster_size(const mem_cluster_t &c, const mem_cluster_t &d)
+{
+  return c.size > d.size;
+}
+
+
+static void
+print_clusters()
+{
+  ADDRINT addr, base;
+  unsigned long size;
+  bool w, x;
+  unsigned j, n, m;
+  char buf[32];
+  std::vector<mem_cluster_t> clusters;
+  std::map<ADDRINT, mem_access_t>::iterator i;
+
+  /* group shadow_mem into consecutive clusters */
+  base = 0;
+  size = 0;
+  w    = false;
+  x    = false;
+  for(i = shadow_mem.begin(); i != shadow_mem.end(); i++) {
+    addr = i->first;
+    if(addr == base+size) {
+      if(i->second.w) w = true;
+      if(i->second.x) x = true;
+      size++;
+    } else {
+      if(base > 0) {
+        clusters.push_back(mem_cluster_t(base, size, w, x));
+      }
+      base  = addr;
+      size  = 1;
+      w     = i->second.w;
+      x     = i->second.x;
+    }
+  }
+
+  /* find largest cluster */
+  size = 0;
+  for(j = 0; j < clusters.size(); j++) {
+    if(clusters[j].size > size) {
+      size = clusters[j].size;
+    }
+  }
+
+  /* sort by largest cluster */
+  std::sort(clusters.begin(), clusters.end(), cmp_cluster_size);
+
+  /* print cluster bar graph */
+  fprintf(logfile, "******* Memory access clusters *******\n");
+  for(j = 0; j < clusters.size(); j++) {
+    n = ((float)clusters[j].size/size)*80;
+    fsize_to_str(clusters[j].size, buf, 32);
+    fprintf(logfile, "0x%016jx (%9s) %s%s: ", 
+            clusters[j].base, buf,
+            clusters[j].w ? "w" : "-", clusters[j].x ? "x" : "-");
+    for(m = 0; m < n; m++) {
+      fprintf(logfile, "=");
+    }
+    fprintf(logfile, "\n");
+  }
+}
+
+
+static void
+fini(INT32 code, void *v)
+{
+  print_clusters();
+  fprintf(logfile, "------- unpacking complete -------\n");
+  fclose(logfile);
+}
+
+
+int
+main(int argc, char *argv[])
+{
+  if(PIN_Init(argc, argv) != 0) {
+    fprintf(stderr, "PIN_Init failed\n");
+    return 1;
+  }
+
+  logfile = fopen(KnobLogFile.Value().c_str(), "a");
+  if(!logfile) {
+    fprintf(stderr, "failed to open '%s'\n", KnobLogFile.Value().c_str());
+    return 1;
+  }
+  fprintf(logfile, "------- unpacking binary -------\n");
+
+  INS_AddInstrumentFunction(instrument_mem_cflow, NULL);
+  PIN_AddFiniFunction(fini, NULL);
+
+  PIN_StartProgram();
+    
+  return 1;
+}
+```
+
+安装加壳器upx，`sudo apt install upx`。对/bin/ls进行加壳。
+
+```bash
+$ cp /bin/ls packed
+$ upx packed
+                       Ultimate Packer for eXecutables
+                          Copyright (C) 1996 - 2013
+UPX 3.91        Markus Oberhumer, Laszlo Molnar & John Reiser   Sep 30th 2013
+
+        File size         Ratio      Format      Name
+   --------------------   ------   -----------   -----------
+    126584 ->     57188   45.18%  linux/ElfAMD   packed
+
+Packed 1 file.
+```
+
+使用Unpacker测试经由upx加壳后的/bin/ls。
+
+```bash
+$ pin -t ./obj-intel64/unpacker.so -- ./packed
+makefile        obj-intel64  unpacked.0x400000-0x41da64_entry-0x40000c  unpacked.0x800000-0x80dd42_entry-0x80d6d0  unpacker.log
+makefile.rules  packed       unpacked.0x800000-0x80d6d0_entry-0x80d465  unpacker.cpp
+$ head unpacker.log
+------- unpacking binary -------
+extracting unpacked region 0x0000000000800000 (   53.7kB) wx entry 0x000000000080d465
+extracting unpacked region 0x0000000000800000 (   55.3kB) wx entry 0x000000000080d6d0
+extracting unpacked region 0x0000000000400000 (  118.6kB) wx entry 0x000000000040000c
+******* Memory access clusters *******
+0x0000000000400000 (  118.6kB) wx: ================================================================================
+0x0000000000800000 (   55.3kB) wx: =====================================
+0x000000000061de00 (    4.5kB) w-: ===
+0x00007ffd1bed9090 (    3.8kB) w-: ==
+0x00007f09b78e12a0 (    3.3kB) w-: ==
+$ file unpacked.0x400000-0x41da64_entry-0x40000c
+unpacked.0x400000-0x41da64_entry-0x40000c: ERROR: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2 error reading (Invalid argument)
+```
+
+由于节头表在运行时不可用，因此脱壳器无法恢复它。
+
+使用strings查看脱壳后的二进制文件中的字符串，可以看到很多字符串，表明脱壳成功。
+
+```bash
+$ strings unpacked.0x400000-0x41da64_entry-0x40000c
+...
+Usage: %s [OPTION]... [FILE]...
+List information about the FILEs (the current directory by default).
+Sort entries alphabetically if none of -cftuvSUX nor --sort is specified.
+Mandatory arguments to long options are mandatory for short options too.
+  -a, --all                  do not ignore entries starting with .
+  -A, --almost-all           do not list implied . and ..
+      --author               with -l, print the author of each file
+  -b, --escape               print C-style escapes for nongraphic characters
+      --block-size=SIZE      scale sizes by SIZE before printing them; e.g.,
+                               '--block-size=M' prints sizes in units of
+                               1,048,576 bytes; see SIZE format below
+  -B, --ignore-backups       do not list implied entries ending with ~
+  -c                         with -lt: sort by, and show, ctime (time of last
+                               modification of file status information);
+                               with -l: show ctime and sort by name;
+                               otherwise: sort by ctime, newest first
+  -C                         list entries by columns
+      --color[=WHEN]         colorize the output; WHEN can be 'always' (default
+                               if omitted), 'auto', or 'never'; more info below
+  -d, --directory            list directories themselves, not their contents
+  -D, --dired                generate output designed for Emacs' dired mode
+  -f                         do not sort, enable -aU, disable -ls --color
+  -F, --classify             append indicator (one of */=>@|) to entries
+...
+```
+
+对/bin/ls反汇编
+
+```bash
+objdump -M intel -d /bin/ls
+...
+402a00:       41 57                   push   r15
+402a02:       41 56                   push   r14
+402a04:       41 55                   push   r13
+402a06:       41 54                   push   r12
+402a08:       55                      push   rbp
+402a09:       53                      push   rbx
+402a0a:       89 fb                   mov    ebx,edi
+402a0c:       48 89 f5                mov    rbp,rsi
+402a0f:       48 81 ec 88 03 00 00    sub    rsp,0x388
+402a16:       48 8b 3e                mov    rdi,QWORD PTR [rsi]
+402a19:       64 48 8b 04 25 28 00    mov    rax,QWORD PTR fs:0x28
+402a20:       00 00
+402a22:       48 89 84 24 78 03 00    mov    QWORD PTR [rsp+0x378],rax
+402a29:       00
+402a2a:       31 c0                   xor    eax,eax
+402a2c:       e8 cf b0 00 00          call   40db00 <__sprintf_chk@plt+0xb120>
+402a31:       be c1 9a 41 00          mov    esi,0x419ac1
+402a36:       bf 06 00 00 00          mov    edi,0x6
+402a3b:       e8 00 fe ff ff          call   402840 <setlocale@plt>
+...
+```
+
+对加壳文件反汇编
+
+```bash
+$ objdump -M intel -b binary -mi386 -Mx86-64 -D unpacked.0x400000-0x41da64_entry-0x40000c
+...
+2a00:       41 57                   push   r15
+2a02:       41 56                   push   r14
+2a04:       41 55                   push   r13
+2a06:       41 54                   push   r12
+2a08:       55                      push   rbp
+2a09:       53                      push   rbx
+2a0a:       89 fb                   mov    ebx,edi
+2a0c:       48 89 f5                mov    rbp,rsi
+2a0f:       48 81 ec 88 03 00 00    sub    rsp,0x388
+2a16:       48 8b 3e                mov    rdi,QWORD PTR [rsi]
+2a19:       64 48 8b 04 25 28 00    mov    rax,QWORD PTR fs:0x28
+2a20:       00 00
+2a22:       48 89 84 24 78 03 00    mov    QWORD PTR [rsp+0x378],rax
+2a29:       00
+2a2a:       31 c0                   xor    eax,eax
+2a2c:       e8 cf b0 00 00          call   0xdb00
+2a31:       be c1 9a 41 00          mov    esi,0x419ac1
+2a36:       bf 06 00 00 00          mov    edi,0x6
+2a3b:       e8 00 fe ff ff          call   0x2840
+...
+```
+
+可以看到除了代码地址不同外，二者的其余代码是相同的，地址不同是因为objdump命令缺少节头表而不知道脱壳的二进制文件的预期加载地址。脱壳后的二进制文件中，objdump命令也无法使用函数名自动注释对.plt中桩代码(stub)的调用。
+
+
+
 ## 参考
 
 1. 《编译系统透视：图解编译原理》，第8章-预处理
@@ -4219,5 +5306,6 @@ adc byte ptr [rax - 0x7d], cl; ret                                              
 5. 《程序员的自我修养---链接、装载与库》
 6. [PE Format - Win32 apps | Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/debug/pe-format)
 7. [LIB BFD, the Binary File Descriptor Library (gnu.org)](https://ftp.gnu.org/old-gnu/Manuals/bfd-2.9.1/html_mono/bfd.html#SEC1)
-7. [基本 ROP - CTF Wiki (ctf-wiki.org)](https://ctf-wiki.org/pwn/linux/user-mode/stackoverflow/x86/basic-rop/)
-
+8. [基本 ROP - CTF Wiki (ctf-wiki.org)](https://ctf-wiki.org/pwn/linux/user-mode/stackoverflow/x86/basic-rop/)
+9. [Intel® 64 and IA-32 Architectures Software Developer Manuals](https://www.intel.cn/content/www/cn/zh/developer/articles/technical/intel-sdm.html)
+10. [Pin: Pin 3.24 User Guide (intel.com)](https://software.intel.com/sites/landingpage/pintool/docs/98612/Pin/doc/html/index.html)
