@@ -1,4 +1,4 @@
-第一部分、二进制格式
+# 第一部分、二进制格式
 
 ## 1. 二进制剖析
 
@@ -5469,6 +5469,790 @@ DTA系统的污点策略描述了系统如何传播污点，以及多个污点�
 - 污点处理指令链：用于按时间顺序存储与污点数据处理相关的所有指令。
 
 当遇到会引起污点传播的指令时，首先对指令中的每个操作数都通过污点快速映射查找影子内存中是否存在与之对应的影子污点从而确定其是否为污点数据，然后根据污点传播规则得到该指令引起的污点传播结果，并将传播产生的新污点添加到影子内存和污点传播树中，同时将失效污点对应的影子污点删除。同时由于一条指令是否涉及污点数据的处理，需要在污点分析过程中动态确定，因此需要在污点处理指令链中记录污点数据的指令信息。
+
+
+
+## 11. 基于libdft的动态污点分析
+
+### 11.1 libdft简介
+
+libdft是基于Intel Pin构建的**字节粒度污点追踪系统**，是目前最易于使用的DTA库之一。libdft是一个开源项目，因此能对它进行扩展来支持64位或更多的指令。
+
+libdft**缺点**: 
+
+1. 只支持32位x86架构。可以在64位系统上使用libdft，但只能分析32位的进程。
+2. 依赖于旧版本的Pin（v2.11～v2.14）。
+3. 只支持“常规”的x86指令，而不支持诸如MMX和SSE这样的扩展指令集， 这意味着如果污点流经这些指令，libdft可能会遇到污点丢失的问 题。如果从源代码编译待分析的程序，那么请使用GCC的编译选项mno-{mmx,sse,sse2,sse3}，使二进制文件不包含MMX和SSE指令。
+
+
+
+#### 11.1.1 libdft的内部结构
+
+**libdft的内部结构：影子内存和虚拟CPU的实现、插桩及API**:
+
+![libdft的内部结构：影子内存和虚拟CPU的实现、插桩及API](assets/Practical-Binary-Analysis/image-20220823235325839.png)
+
+libdft是基于Intel Pin的，libdft使用Pin以污点传播逻辑来对指令进行插桩。污点本身存储在影子内存中，并且程序可以通过libdft提供的API对其进行访问。
+
+1. **影子内存**
+
+libdft有两种变体，每种变体都有不同类型的影子内存，在libdft术语中被称为**标记映射（tagmap）**。
+
+第一种基于位图的变体只支持1种污点颜色，但速度更快一些，内存开销也较另一种变体少。在哥伦比亚大学网站提供的libdft源文件中，该变体位于源文件的libdft_linux-i386目录下。第二种变体实现了支持8 种污点颜色的影子内存，可以在源文件的libdft-ng_linux-i386目录下找到该变体。为了最小化8种污点颜色的影子内存的内存需求，libdft使用了 一个优化的数据结构——**段转换表（Segment Translation Table， STAB）**。STAB为每个内存页保存一条记录，而每条记录都包含一个 addend值，即一个32位的偏移量，它与虚拟内存地址相加即为对应影子字节的地址。
+
+STAB提供了一个间接层，因此libdft在应用程序分配虚拟内存 时可按需分配影子内存。影子内存以页面大小的块进行分配，从而将内存开销降到最低。由于每个分配的内存页恰好对应一个影子内存页，因此程序可以对同一页面中的所有地址使用相同的addend。对于具有多个相邻页的虚拟内存区域，libdft确保影子内存页也是相邻的，从而简化了对影子内存的访问。相邻影子内存映射页的每个块称为**标记映射段（tagmap segment，tseg）**。此外，libdft将所有只读内存页映射到相同的全零影子内存页，来优化内存使用。
+
+2. **虚拟CPU**
+
+为了追踪CPU寄存器的污点状态，libdft在内存中保存了一个称为**虚拟CPU**的特殊结构。虚拟CPU是一种微型影子内存，它为x86上所有 可用的32位通用CPU寄存器（如edi、esi、ebp、esp、ebx、edx、 ecx及eax等）都对应了4字节的影子内存。此外，虚拟CPU上还有一 个特殊的暂存（scratch）寄存器，libdft使用它来存储所有无法识别的寄存器的污点。
+
+3. **污点追踪引擎**
+
+libdft使用Pin的API检查二进制文件中的所有指令，然后使用相关的污点传播函数对这些指令进行插桩，在`libdft/libdftng_linux-i386/src/libdft_core.c`文件中找到libdft的污点传播函数的实现，污点传播函数实现了libdft的污点传播策略。
+
+4. **libdft API和I/O接口**
+
+构建DTA工具最重要的两类函数是**操作标记映射的函数**以及**添加回调和插桩代码的函数**。
+
+头文件tagmap.h中有与标记映射相关的API的定义，如**tagmap_setb**函数可以将内存字节标记为污点，**tagmap_getb**函数可以检索内存字节的污点信息。 用于添加回调函数和插桩代码的API 分别被定义在头文件 libdft_api.h 和 syscall_desc.h中。可以使用**syscall_set_pre** 函数和**syscall_set_post**函数为系统调用事件注册回调函数。 libdft使用一个名为**syscall_desc**的专用数组来存储所有的回调函数，该数组可以追踪安装的所有系统调用的前置或后置回调函数。 类似地，可以用**ins_set_pre**函数和**ins_set_post**函数注册指令回调函数。
+
+
+
+#### 11.1.2 污点传播策略指令
+
+libdft的污点传播策略定义了以下5类指令。每类指令都以不同的方式传播和合并污点。
+
+1. **ALU**
+
+ALU是带有两个或三个操作数的算术和逻辑指令，如add、sub、 and、xor、div及imul等。对于这些操作，libdft以与add和xor指令示例相同的方式合并污点。
+
+2. **XFER**
+
+XFER类指令包含将值复制到另一个寄存器或内存位置的所有指 令，如mov指令。同样，就像表10-1中mov指令的示例一样，libdft使用赋值操作（:=）进行处理。对于这些指令，libdft只是将污点 从源操作数复制到目标操作数。
+
+3. **CLR**
+
+CLR类指令不会将其输出操作数标记为污点。换句话说，libdft将输出污点设置为空集（）。该类指令包含其他类型指令的一些特殊情况，如操作数与自身进行异或、相减，又如cpuid等攻击者无法控制输出的指令。
+
+4. **SPECIAL**
+
+这类指令需要特殊的规则来进行处理。其中，包括xchg和cmpxchg指令（将两个操作数的污点交换），以及lea指令（污点源于内存地址计算）。
+
+5. **FPU、MMX、SSE**
+
+这类指令包含了libdft当前不支持的指令，如FPU、MMX、SSE指 令。当污点流经以上指令时，libdft无法追踪，因此污点信息不会传播到指令的输出操作数，从而导致污点丢失。
+
+
+
+### 11.2 使用DTA检测远程控制流劫持攻击
+
+**思路**：该工具检测的是通过网络接收的数据来控制execve调用参数的攻击。因此，污点源为网络接收函数recv和recvfrom，而系统调用 execve是检查点。除了使用recv和recvfrom接收的数据外，还可以考虑系统调用read 从网络读取的数据。此外，为了防止将无关的文件读取并标记为污 点，还需要通过钩子（hook）网络调用（如accept），来追踪从网络读取的文件描述符。
+
+许多基于libdft的DTA工具都会将系统调用钩子，以作为污点源 和检查点。在Linux操作系统上，每个系统调用都有自己的系统调用号 （syscall number），libdft使用它们作为syscall_desc数组的 索引。有关可用的系统调用及其相关的系统调用编号，x86平台（32 位）可参考`/usr/include/x86_64-linux-gnu/asm/unistd_32.h`，x64 平台可参考`/usr/ include/asm-generic/unistd.h`。
+
+```c
+#include "pin.H"
+
+#include "branch_pred.h"
+#include "libdft_api.h"
+#include "syscall_desc.h"
+#include "tagmap.h"
+
+extern syscall_desc_t syscall_desc[SYSCALL_MAX];
+
+#define DBG_PRINTS 1
+
+int
+main(int argc, char **argv)
+{
+  PIN_InitSymbols();
+
+  if(unlikely(PIN_Init(argc, argv))) {
+    return 1;
+  }
+
+  if(unlikely(libdft_init() != 0)) {
+    libdft_die();
+    return 1;
+  }
+
+  syscall_set_post(&syscall_desc[__NR_socketcall], post_socketcall_hook);
+  syscall_set_pre (&syscall_desc[__NR_execve], pre_execve_hook);
+
+  PIN_StartProgram();
+	
+  return 0;
+}
+```
+
+
+
+
+
+#### 11.2.1 检查污点信息
+
+在本例中，检查点是一个名为 pre_execve_hook的系统调用钩子，通过检查execve的参数是否被标记为污点，来判断是否发生控制流劫持攻击。若发生控制流劫持攻击，则发出警报并通过终止应用程序来阻止攻击。由于execve的每个参数都要被执行重复的污点检查，因此我在一个名为check_string_taint的函数中单独实现了污点检查。
+
+```c
+void
+alert(uintptr_t addr, const char *source, uint8_t tag)
+{
+  fprintf(stderr, "\n(dta-execve) !!!!!!! ADDRESS 0x%x IS TAINTED (%s, tag=0x%02x), ABORTING !!!!!!!\n",
+          addr, source, tag);
+  exit(1);
+}
+
+void
+check_string_taint(const char *str, const char *source)
+{
+  uint8_t tag;
+  uintptr_t start = (uintptr_t)str;
+  uintptr_t end   = (uintptr_t)str+strlen(str);
+
+#if DBG_PRINTS
+  fprintf(stderr, "(dta-execve) checking taint on bytes 0x%x -- 0x%x (%s)... ",
+          start, end, source);
+#endif
+
+  for(uintptr_t addr = start; addr <= end; addr++) {
+    tag = tagmap_getb(addr);
+    if(tag != 0) alert(addr, source, tag);
+  }
+
+#if DBG_PRINTS
+  fprintf(stderr, "OK\n");
+#endif
+}
+```
+
+
+
+#### 11.2.2 污点源：将收到的字节标记为污点
+
+alert函数只输出了一条包含污点地址详细信息的警告消息， 然后调用exit函数来终止应用程序以阻止攻击。实际的污点检查逻辑 是在check_string_taint函数中实现的，该函数接收两个字符 串作为输入。第一个字符串（str）用于检查污点。第二个字符串 （source）是一个诊断字符串，包含第一个字符串的来源，即execve路径、execve参数或环境参数，然后被传递给alert函数并输出。 check_string_taint函数循环遍历str所有的字节来检查污点，并使用libdft的tagmap_getb函数检查每一字节的污点状态。如果字节被标记为污点，则程序调用alert函数输出错误信息并退出。 tagmap_getb函数接收1字节的内存地址（以uintptr_t的形式）作为输入，并返回对应该地址污点颜色的影子字节。因为 libdft为程序内存中每字节保留一个影子字节，所以污点颜色（标记tag）是uint8_t类型。如果标记为零，则内存字节不是污点，否则内存字节被标记为污点，标记的颜色可用于确定污点源。因为这个DTA工具只有一个污点源（网络接收），所以只使用 一种污点颜色。 有时需要一次获取多个内存字节的污点标记。为此，libdft提供了类似于tagmap_getb函数的tagmap_getw函数和tagmap_getl函数，以uint16_t或uint32_t的形式同时返回两个或四个连续的影子字节。
+
+```c
+static void
+post_socketcall_hook(syscall_ctx_t *ctx)
+{
+  int fd;
+  void *buf;
+  size_t len;
+
+  int call            =            (int)ctx->arg[SYSCALL_ARG0];
+  unsigned long *args = (unsigned long*)ctx->arg[SYSCALL_ARG1];
+
+  switch(call) {
+  case SYS_RECV:
+  case SYS_RECVFROM:
+    if(unlikely(ctx->ret <= 0)) {
+      return;
+    }
+
+    fd  =    (int)args[0];
+    buf =  (void*)args[1];
+    len = (size_t)ctx->ret;
+
+#if DBG_PRINTS
+    fprintf(stderr, "(dta-execve) recv: %zu bytes from fd %u\n", len, fd);
+
+    for(size_t i = 0; i < len; i++) {
+      if(isprint(((char*)buf)[i])) fprintf(stderr, "%c", ((char*)buf)[i]);
+      else                         fprintf(stderr, "\\x%02x", ((char*)buf)[i]);
+    }
+    fprintf(stderr, "\n");
+
+    fprintf(stderr, "(dta-execve) tainting bytes %p -- 0x%x with tag 0x%x\n", 
+            buf, (uintptr_t)buf+len, 0x01);
+#endif
+
+    tagmap_setn((uintptr_t)buf, len, 0x01);
+
+    break;
+
+  default:
+    break;
+  }
+}
+```
+
+
+
+#### 11.2.3 检查点：检查execve参数
+
+pre_execve_hook函数，它是execve调 用前的系统钩子，用于确保execve的输入没有被标记为污点。
+
+ pre_execve_hook函数使用check_string_taint函数检测输入是否被标记为污点。首先，它判断execve的第一个参数是否被标记为污点。随后，它循环遍历execve参数数组，检查每个参数是否被标记为污点。最后，pre_execve_hook函数遍历环境变量数组并检测每个环境参数是否被标记为污点。如果没有任何输入被标记为污点，pre_execve_hook函数运行结束，execve将继续运行。反之，如果pre_execve_hook函数发现存在被标记为污点的输入，则终止程序，并输出错误信息。
+
+```c
+static void
+pre_execve_hook(syscall_ctx_t *ctx)
+{
+  const char *filename =  (const char*)ctx->arg[SYSCALL_ARG0];
+  char * const *args   = (char* const*)ctx->arg[SYSCALL_ARG1];
+  char * const *envp   = (char* const*)ctx->arg[SYSCALL_ARG2];
+
+#if DBG_PRINTS
+  fprintf(stderr, "(dta-execve) execve: %s (@%p)\n", filename, filename);
+#endif
+
+  check_string_taint(filename, "execve command");
+  while(args && *args) {
+#if DBG_PRINTS
+    fprintf(stderr, "(dta-execve) arg: %s (@%p)\n", *args, *args);
+#endif
+    check_string_taint(*args, "execve argument");
+    args++;
+  }
+  while(envp && *envp) {
+#if DBG_PRINTS
+    fprintf(stderr, "(dta-execve) env: %s (@%p)\n", *envp, *envp);
+#endif
+    check_string_taint(*envp, "execve environment parameter");
+    envp++;
+  }
+}
+```
+
+
+
+#### 11.2.4 检测控制流劫持攻击
+
+execve-test-overflow是一个简单的服务器程序，它打开一 个网络套接字（清单中使用省略的open_socket函数），并在本地 主机上的9999号端口进行监听。接下来，它从套接字接收一条消息，并将该消息传递给exec_cmd函数。exec_cmd是一个调用execv执行命令的缺陷函数，可能会被攻击者向服务器发送的恶意消息所影响。exec_cmd执行结束后 会返回一个文件描述符，服务器使用该描述符读取已执行命令的输出 。最后，服务器将输出写入网络套接字中。 正常情况下，exec_cmd函数执行一个名为date的程序来获取当前时间和日期，然后服务器在其前面加上之前从套接字接收到的消息 并发送到网络。然而，exec_cmd包含一个允许攻击者运行命令的漏 洞服务器使用一个全局的结构体cmd来追踪命令及其相关参数。 cmd包含保存命令输出的prefix字符数组（之前从套接字接收的消 息）、日期格式字符串及一个包含date命令本身的缓冲区。 现在看一下exec_cmd函数，它首先将从网络接收到的消息（存储在buf中）复制到cmd的prefix字段。如你所见，该复制过程缺少适当的边界检查，这意味着攻击者可以发送能够导致 prefix字符数组溢出的恶意消息，从而覆盖cmd中包含日期格式和命令路径的相邻字段。 接下来，exec_cmd函数将命令和日期格式参数从cmd结构复制到argv数组中，以供execv函数使用。然后，它打开管道并使用fork函数启动子进程来执行命令并向父进程报告输出。子进程将 stdout重定向到管道上，以便父进程可以从管道中读取execv函数的输出并将其转发到套接字上。最后，子进程将可能被攻击者控制的命令和参数作为输入来调用execv函数。
+
+**execve-test-overflow.c**
+
+```c
+int
+open_socket(const char *node, const char *service)
+{
+  struct addrinfo hints, *res;
+  int sockfd;
+
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family   = AF_INET;
+  hints.ai_socktype = SOCK_DGRAM;
+  hints.ai_flags    = AI_PASSIVE;
+  if(getaddrinfo(NULL, "9999", &hints, &res) != 0) {
+    return -1;
+  }
+
+  if((sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) < 0) {
+    return -1;
+  }
+  if(bind(sockfd, res->ai_addr, res->ai_addrlen) < 0) {
+    return -1;
+  }
+
+  return sockfd;
+}
+
+size_t
+split_cmd(char *buf, char **cmd, char *argv[], size_t max_argc)
+{
+  size_t argc, i, n;
+
+  n = strlen(buf);
+  argc = 0;
+  for(i = 0; i < n; i++) {
+    if(argc >= max_argc-1) break;
+    argv[argc++] = &buf[i];
+    while(buf[i] != ' ' && buf[i] != '\n' && i < n) {
+      i++;
+    }
+    buf[i] = '\0';
+  }
+  argv[argc] = NULL;
+  *cmd = argv[0];
+
+  return argc;
+}
+
+int
+exec_cmd(char *buf)
+{
+  int pid;
+  int p[2];
+  char *cmd, *argv[10];
+  size_t i, argc;
+
+  argc = split_cmd(buf, &cmd, argv, 10);
+
+  if(pipe(p) < 0) {
+    perror("(execve-test) failed to open pipe");
+    return -1;
+  }
+
+  switch(pid = fork()) {
+  case -1: /* Error */
+    perror("(execve-test) fork failed");
+    return -1;
+  case 0:  /* Child */
+    printf("(execve-test/child) execv: %s\n", cmd);
+    for(i = 0; i < argc; i++) {
+      printf("(execve-test/child)  argv[%zu] = %s\n", i, argv[i]);
+    }
+    fflush(stdout);
+
+    close(1);
+    dup(p[1]);
+    close(p[0]);
+
+    execv(cmd, argv);
+    perror("(execve-test/child) execve failed");
+    kill(getppid(), SIGINT);
+    exit(1);
+  default: /* Parent */
+    close(p[1]);
+    return p[0];
+  }
+
+  return -1;
+}
+
+int
+main(int argc, char *argv[])
+{
+  FILE *fp;
+  int child_fd;
+  char buf[4096];
+  socklen_t addrlen;
+  struct sockaddr_storage addr;
+
+  int sockfd = open_socket("localhost", "9999");
+  if(sockfd < 0) {
+    fprintf(stderr, "(execve-test) failed to open socket\n");
+    return 1;
+  }
+
+  addrlen = sizeof(addr);
+  if(recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr*)&addr, &addrlen) < 0) {
+    fprintf(stderr, "(execve-test) recvfrom failed\n");
+    return 1;
+  }
+
+  if((child_fd = exec_cmd(buf)) < 0) {
+    fprintf(stderr, "(execve-test) failed to exec command: %s\n", buf);
+    return 1;
+  }
+  fp = fdopen(child_fd, "r");
+
+  while(fgets(buf, sizeof(buf), fp)) {
+    sendto(sockfd, buf, strlen(buf)+1, 0, (struct sockaddr*)&addr, addrlen);
+  }
+
+  fclose(fp);
+
+  return 0;
+}
+```
+
+
+
+1. **在没有DTA的情况下成功劫持控制流**
+
+```bash
+$ ./execve-test-overflow & 
+[1] 3110
+$ nc -u 127.0.0.1 9999
+foobar:
+(execve-test/child) execv: /home/binary/code/chapter11/date %Y-%m-%d %H:%M:%S
+foobar: 2017-12-06 15:25:08
+ˆC
+[1]+ Done ./execve-test-overflow
+$ ./execve-test-overflow &
+[1] 3126
+$ nc -u 127.0.0.1 9999
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo
+(execve-test/child) execv: /home/binary/code/chapter11/echo BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo
+^C
+[1]+  Done                    ./execve-test-overflow
+```
+
+全局cmd结构的内容如下所示：
+
+```c
+static struct __attribute__((packed)) {
+     char prefix[32];  /* AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA */
+     char datefmt[32]; /* BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB */
+     char cmd[64];     /* /home/binary/code/chapter11/echo */
+} cmd;
+```
+
+
+
+2. **使用DTA检测控制流劫持攻击**
+
+为测试dta-execve是否能够阻止上述攻击，我们再次进行相同的攻击。这一次，execve-test-overflow会受到dta-execve的保护。
+
+```bash
+$ ./pin.sh -follow_execv -t /home/binary/code/chapter11/dta-execve.so -- /home/binary/code/chapter11/execve-test-overflow & 
+[1] 3136
+$ nc -u 127.0.0.1 9999
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo
+(dta-execve) recv: 97 bytes from fd 4
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo\x0a
+(dta-execve) tainting bytes 0xffac80cc -- 0xffac812d with tag 0x1
+(execve-test/child) execv: /home/binary/code/chapter11/echo BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo
+(dta-execve) execve: /home/binary/code/chapter11/echo (@0x804b100)
+(dta-execve) checking taint on bytes 0x804b100 -- 0x804b120 (execve command)... 
+(dta-execve) !!!!!!! ADDRESS 0x804b100 IS TAINTED (execve command, tag=0x01), ABORTING !!!!!!!
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo^C
+[1]+  Done                    ./pin.sh -follow_execv -t /home/binary/code/chapter11/dta-execve.so -- /home/binary/code/chapter11/execve-test-overflow
+```
+
+
+
+### 11.3 用隐式流绕过DTA
+
+到目前为止一切顺利：dta-execve成功地检测并阻止了上节中提到的控制流劫持攻击。然而dta-execve并非完全可靠，因为libdft等DTA系统**无法追踪通过隐式流传播的数据**。以下显示了execve-test-overflow服务器的修改版本，其中包含了一个隐式流，用于防止dta-execve检测到攻击。
+
+产生隐式流的原因是控制依赖，这意味着数据传播依赖于控制结构，而不是显式的数据操作。简单起见，以下只展示了与原始服务器代码不同的部分。
+
+**execve-test-overflow-implicit.c**
+
+```c
+int
+exec_cmd(char *buf)
+{
+  int pid;
+  int p[2];
+  size_t i;
+  char c;
+  char *argv[3];
+
+  for(i = 0; i < strlen(buf); i++) {
+    if(buf[i] == '\n') {
+      cmd.prefix[i] = '\0';
+      break;
+    }
+    c = 0;
+    while(c < buf[i]) c++;
+    cmd.prefix[i] = c;
+  }
+
+  argv[0] = cmd.cmd;
+  argv[1] = cmd.datefmt;
+  argv[2] = NULL;
+
+  if(pipe(p) < 0) {
+    perror("(execve-test) failed to open pipe");
+    return -1;
+  }
+
+  switch(pid = fork()) {
+  case -1: /* Error */
+    perror("(execve-test) fork failed");
+    return -1;
+  case 0:  /* Child */
+    printf("(execve-test/child) execv: %s %s\n", argv[0], argv[1]);
+    fflush(stdout);
+
+    close(1);
+    dup(p[1]);
+    close(p[0]);
+
+    printf("%s", cmd.prefix);
+    fflush(stdout);
+    execv(argv[0], argv);
+    perror("(execve-test/child) execve failed");
+    kill(getppid(), SIGINT);
+    exit(1);
+  default: /* Parent */
+    close(p[1]);
+    return p[0];
+  }
+
+  return -1;
+}
+```
+
+测试，尽管现在有dta-execve的保护，但是攻击仍然能够成功！
+
+```bash
+$ ./pin.sh -follow_execv -t /home/binary/code/chapter11/dta-execve.so -- /home/binary/code/chapter11/execve-test-overflow-implicit & 
+[1] 3154
+$ nc -u 127.0.0.1 9999
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo
+(dta-execve) recv: 97 bytes from fd 4
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo\x0a
+(dta-execve) tainting bytes 0xffdc01fc -- 0xffdc025d with tag 0x1
+(execve-test/child) execv: /home/binary/code/chapter11/echo BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo
+(dta-execve) execve: /home/binary/code/chapter11/echo (@0x804b100)
+(dta-execve) checking taint on bytes 0x804b100 -- 0x804b120 (execve command)... OK
+(dta-execve) arg: /home/binary/code/chapter11/echo (@0x804b100)
+(dta-execve) checking taint on bytes 0x804b100 -- 0x804b120 (execve argument)... OK
+(dta-execve) arg: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo (@0x804b0e0)
+(dta-execve) checking taint on bytes 0x804b0e0 -- 0x804b120 (execve argument)... OK
+(dta-execve) env: XDG_VTNR=7 (@0xffdc31b5)
+(dta-execve) checking taint on bytes 0xffdc31b5 -- 0xffdc31bf (execve environment parameter)... OK
+(dta-execve) env: LC_PAPER=nl_NL.UTF-8 (@0xffdc31c0)
+(dta-execve) checking taint on bytes 0xffdc31c0 -- 0xffdc31d4 (execve environment parameter)... OK
+...
+(dta-execve) checking taint on bytes 0xffdc3f18 -- 0xffdc3fbd (execve environment parameter)... OK
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB/home/binary/code/chapter11/echo^C[1]+  Done                    ./pin.sh -follow_execv -t /home/binary/code/chapter11/dta-execve.so -- /home/binary/code/chapter11/execve-test-overflow-implicit
+```
+
+
+
+### 11.4 基于DTA的数据泄露检测器
+
+前面的示例工具只使用一种污点颜色，因为数据要么是攻击者控制的，要么不是。现在构建一个使用多种污点颜色来检测基于文件的信息泄露的工具，以便当文件泄露时，可以知道是哪个文件发生了泄露。该工具背后的思想与在第10章中看到的基于污点的心脏滴血漏洞的防御类似，只是该工具使用文件读取而不是内存缓冲区作为污点源。
+
+**dta-dataleak.cpp**
+
+```cpp
+#include "pin.H"
+
+#include "branch_pred.h"
+#include "libdft_api.h"
+#include "syscall_desc.h"
+#include "tagmap.h"
+
+extern syscall_desc_t syscall_desc[SYSCALL_MAX];
+static std::map<int, uint8_t> fd2color;
+static std::map<uint8_t, std::string> color2fname;
+
+#define MAX_COLOR 0x80
+#define DBG_PRINTS 1
+
+void
+alert(uintptr_t addr, uint8_t tag)
+{
+  fprintf(stderr, "\n(dta-dataleak) !!!!!!! ADDRESS 0x%x IS TAINTED (tag=0x%02x), ABORTING !!!!!!!\n",
+          addr, tag);
+
+  for(unsigned c = 0x01; c <= MAX_COLOR; c <<= 1) {
+    if(tag & c) {
+      fprintf(stderr, "  tainted by color = 0x%02x (%s)\n", c, color2fname[c].c_str());
+    }
+  }
+  exit(1);
+}
+
+int
+main(int argc, char **argv)
+{
+  PIN_InitSymbols();
+
+  if(unlikely(PIN_Init(argc, argv))) {
+    return 1;
+  }
+
+  if(unlikely(libdft_init() != 0)) {
+    libdft_die();
+    return 1;
+  }
+
+  syscall_set_post(&syscall_desc[__NR_open], post_open_hook);
+  syscall_set_post(&syscall_desc[__NR_read], post_read_hook);
+  syscall_set_pre (&syscall_desc[__NR_socketcall], pre_socketcall_hook);
+
+  PIN_StartProgram();
+	
+  return 0;
+}
+```
+
+
+
+#### 11.4.1 污点源：追踪打开文件的污点
+
+dta-dataleak安装了两个系统调用后置处理器：一个名为open的系统调用钩子，用于追踪打开的文件；一个名为 read的钩子，用于污染从打开的文件中读取的字节。
+
+1. **追踪打开的文件**
+
+```cpp
+static void
+post_open_hook(syscall_ctx_t *ctx)
+{
+  static uint8_t next_color = 0x01;
+  uint8_t color;
+  int fd            =         (int)ctx->ret;
+  const char *fname = (const char*)ctx->arg[SYSCALL_ARG0];
+
+  if(unlikely((int)ctx->ret < 0)) {
+    return;
+  }
+
+  if(strstr(fname, ".so") || strstr(fname, ".so.")) {
+    return;
+  }
+
+#if DBG_PRINTS
+  fprintf(stderr, "(dta-dataleak) opening %s at fd %u with color 0x%02x\n", fname, fd, next_color);
+#endif
+
+  if(!fd2color[fd]) {
+    color = next_color;
+    fd2color[fd] = color;
+    if(next_color < MAX_COLOR) next_color <<= 1;
+  } else {
+    /* reuse color of file with same fd which was opened previously */
+    color = fd2color[fd];
+  }
+
+  /* multiple files may get the same color if the same fd is reused
+   * or we run out of colors */
+  if(color2fname[color].empty()) color2fname[color] = std::string(fname);
+  else color2fname[color] += " | " + std::string(fname);
+}
+```
+
+
+
+2. **将文件读取标记为污点**
+
+现在，每个打开的文件都与一种污点颜色相关联，post_read_hook函数使用文件分配的颜色将从文件中读取的字节标记为污点。
+
+```cpp
+static void
+post_read_hook(syscall_ctx_t *ctx)
+{
+  int fd     =    (int)ctx->arg[SYSCALL_ARG0];
+  void *buf  =  (void*)ctx->arg[SYSCALL_ARG1];
+  size_t len = (size_t)ctx->ret;
+  uint8_t color;
+
+  if(unlikely(len <= 0)) {
+    return;
+  }
+
+#if DBG_PRINTS
+  fprintf(stderr, "(dta-dataleak) read: %zu bytes from fd %u\n", len, fd);
+#endif
+
+  color = fd2color[fd];
+  if(color) {
+#if DBG_PRINTS
+    fprintf(stderr, "(dta-dataleak) tainting bytes %p -- 0x%x with color 0x%x\n", 
+            buf, (uintptr_t)buf+len, color);
+#endif
+    tagmap_setn((uintptr_t)buf, len, color);
+  } else {
+#if DBG_PRINTS
+    fprintf(stderr, "(dta-dataleak) clearing taint on bytes %p -- 0x%x\n",
+            buf, (uintptr_t)buf+len);
+#endif
+    tagmap_clrn((uintptr_t)buf, len);
+  }
+}
+```
+
+
+
+#### 11.4.2 检查点：监控泄露数据的网络发送
+
+dta-dataleak的检查点，它是拦截网络发送的socketcall回调函数，用于检查网络发送是否有数据泄露。
+
+```cpp
+static void
+pre_socketcall_hook(syscall_ctx_t *ctx)
+{
+  int fd;
+  void *buf;
+  size_t i, len;
+  uint8_t tag;
+  uintptr_t start, end, addr;
+
+  int call            =            (int)ctx->arg[SYSCALL_ARG0];
+  unsigned long *args = (unsigned long*)ctx->arg[SYSCALL_ARG1];
+
+  switch(call) {
+  case SYS_SEND:
+  case SYS_SENDTO:
+    fd  =    (int)args[0];
+    buf =  (void*)args[1];
+    len = (size_t)args[2];
+
+#if DBG_PRINTS
+    fprintf(stderr, "(dta-dataleak) send: %zu bytes to fd %u\n", len, fd);
+
+    for(i = 0; i < len; i++) {
+      if(isprint(((char*)buf)[i])) fprintf(stderr, "%c", ((char*)buf)[i]);
+      else                         fprintf(stderr, "\\x%02x", ((char*)buf)[i]);
+    }
+    fprintf(stderr, "\n");
+
+    fprintf(stderr, "(dta-dataleak) checking taint on bytes %p -- 0x%x...", 
+            buf, (uintptr_t)buf+len);
+#endif
+
+    start = (uintptr_t)buf;
+    end   = (uintptr_t)buf+len;
+    for(addr = start; addr <= end; addr++) {
+      tag = tagmap_getb(addr);
+      if(tag != 0) alert(addr, tag);
+    }
+
+#if DBG_PRINTS
+    fprintf(stderr, "OK\n");
+#endif
+
+    break;
+
+  default:
+    break;
+  }
+}
+```
+
+
+
+#### 11.4.3 检测数据泄露
+
+为了演示dta-dataleak检测数据泄露的能力，实现了另一个服务器dataleak-test-xor。此服务器将自动被标记为污点的文件泄露到套接字，但dta-dataleak同样可以检测通过漏洞泄露的文件。
+
+```cpp
+int
+main(int argc, char **argv)
+{
+  PIN_InitSymbols();
+
+  if(unlikely(PIN_Init(argc, argv))) {
+    return 1;
+  }
+
+  if(unlikely(libdft_init() != 0)) {
+    libdft_die();
+    return 1;
+  }
+
+  syscall_set_post(&syscall_desc[__NR_open], post_open_hook);
+  syscall_set_post(&syscall_desc[__NR_read], post_read_hook);
+  syscall_set_pre (&syscall_desc[__NR_socketcall], pre_socketcall_hook);
+
+  PIN_StartProgram();
+	
+  return 0;
+}
+```
+
+在dta-dataleak的保护下运行dataleak-test-xor程序的输出。
+
+```bash
+$ (dta-dataleak) read: 512 bytes from fd 4
+(dta-dataleak) clearing taint on bytes 0xff8e8e10 -- 0xff8e9010
+$ nc -u 127.0.0.1 9999
+/home/binary/code/chapter11/dta-execve.cpp /home/binary/code/chapter11/dta-dataleak.cpp /home/binary/code/chapter11/date.c /home/binary/code/chapter11/echo.c
+(dta-dataleak) opening /home/binary/code/chapter11/dta-execve.cpp at fd 5 with color 0x01
+(dta-dataleak) opening /home/binary/code/chapter11/dta-dataleak.cpp at fd 6 with color 0x02
+(dta-dataleak) opening /home/binary/code/chapter11/date.c at fd 7 with color 0x04
+(dta-dataleak) opening /home/binary/code/chapter11/echo.c at fd 8 with color 0x08
+(dta-dataleak) read: 347 bytes from fd 7
+(dta-dataleak) tainting bytes 0xa02d5c0 -- 0xa02d71b with color 0x4
+(dta-dataleak) read: 3923 bytes from fd 5
+(dta-dataleak) tainting bytes 0xa02e5c8 -- 0xa02f51b with color 0x1
+(dta-dataleak) send: 20 bytes to fd 4
+\x0cCdclude <stdio.h>\x0a\x00
+(dta-dataleak) checking taint on bytes 0xff8e730c -- 0xff8e7320...
+(dta-dataleak) !!!!!!! ADDRESS 0xff8e730c IS TAINTED (tag=0x05), ABORTING !!!!!!!
+  tainted by color = 0x01 (/home/binary/code/chapter11/dta-execve.cpp)
+  tainted by color = 0x04 (/home/binary/code/chapter11/date.c)
+^C
+[1]+  Exit 1                  ./pin.sh -follow_execv -t ~/code/chapter11/dta-dataleak.so -- ~/code/chapter11/dataleak-test-xor
+```
 
 
 
